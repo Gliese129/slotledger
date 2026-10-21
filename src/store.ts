@@ -4,7 +4,8 @@ import { randomBytes, createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Actor, AnyEvent, Config, EventDataMap, EventType } from "./types.js";
 
-export function resolveRoot(cwd = process.cwd()): string {
+// CC sets CLAUDE_PROJECT_DIR for both hooks and the MCP server; the server's cwd isn't guaranteed to be the project
+export function resolveRoot(cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()): string {
   if (process.env.SLOTBOARD_ROOT) return process.env.SLOTBOARD_ROOT;
   try {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
