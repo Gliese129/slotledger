@@ -1,5 +1,11 @@
 node_modules/
 dist/
-.project/run/
+
+# Local, private: slotboard's own project state and this machine's Claude Code setup
+.project/
 STATUS.md
-.project
+HANDOFF.md
+.claude/
+.mcp.json
+.gitattributes
+research/
