@@ -7,6 +7,18 @@ description: When the project has the slotboard MCP (record/task/verify/ask/resp
 
 slotboard stores decisions as versioned slots. Each decision states its rationale and premises; when a premise changes, the decisions that depend on it are flagged automatically. It won't block you; just follow the steps below.
 
+## Setting up
+
+Before installing slotboard into a project (or when brief says the settings aren't set), ask the user two things, then pass the answers to `slotboard init` or `slotboard config` (brief prints the exact command):
+
+1. **Language**: which language decisions, rationales, task titles and questions should be written in. slotboard's own messages stay in English.
+2. **Strictness**:
+   - strict: record every product, arch, platform and assum decision; tasks count as done only after verify.
+   - balanced (default): record product, arch and platform decisions and the assumptions they rest on.
+   - loose: only product and arch decisions; the end-of-turn check never interrupts you.
+
+Follow the language and strictness that brief shows for the project.
+
 ## When to record
 
 Record as soon as you make or change one of these decisions, not at the end:

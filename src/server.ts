@@ -13,6 +13,9 @@ export function createServer(root = resolveRoot()): McpServer {
   const board = new Board(store);
   const connectionId = "conn-" + ulid().toLowerCase();
   const server = new McpServer({ name: "slotboard", version: VERSION });
+  // Tool descriptions are read once at startup; brief carries the live settings
+  const language = store.readConfig().language;
+  const writeIn = language ? ` Write value and rationale in ${language}.` : "";
 
   const run = (where: string, fn: (session: string) => string) => {
     try {
@@ -31,7 +34,7 @@ export function createServer(root = resolveRoot()): McpServer {
   server.registerTool("record", {
     description:
       "Call when you make or change a decision: product behavior, architecture, target platform, an assumption, a new dependency, a constraint. " +
-      "Calling again with the same key creates a new version. Skip implementation details. Decisions the user stated themselves need userQuote.",
+      "Calling again with the same key creates a new version. Skip implementation details. Decisions the user stated themselves need userQuote." + writeIn,
     inputSchema: {
       key: z.string().describe(`<category>/<dashed-name>; categories: ${CATEGORIES.join(" | ")}. E.g. arch/sync-backend, assum/user-os`),
       value: z.string().describe("The decision, in one sentence"),

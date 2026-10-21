@@ -6,6 +6,7 @@ import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, type State } from "./fold.js";
 import { changedFiles, snapshot } from "./git.js";
 import { buildNudge, buildReport, formatNudge, renderBrief, renderStatusMd, type Report } from "./report.js";
+import { strictnessOf } from "./settings.js";
 import { Store, ulid } from "./store.js";
 import type { Actor, AnyEvent, Dep, QOption, SlotKey, TaskStatus } from "./types.js";
 import { CATEGORIES, GUARDED, categoryOf } from "./types.js";
@@ -69,7 +70,7 @@ export class Board {
   }
 
   brief(): string {
-    return renderBrief(this.load().state, this.store.errorCount());
+    return renderBrief(this.load().state, this.store.readConfig(), this.store.errorCount());
   }
 
   // ---------- record ----------
@@ -326,8 +327,10 @@ export class Board {
 
     const nudgedFile = `nudged-${session}.json`;
     const nudged = new Set(this.store.readRun<string[]>(nudgedFile) ?? []);
-    const fresh = buildNudge(state, analysis).filter((p) => !nudged.has(p.key));
-    if (!stopHookActive && fresh.length) {
+    const strictness = strictnessOf(this.store.readConfig());
+    const fresh = buildNudge(state, analysis, strictness).filter((p) => !nudged.has(p.key));
+    // loose never interrupts the AI; the same findings still reach the user as notes in the report
+    if (!stopHookActive && fresh.length && strictness !== "loose") {
       this.store.writeRun(nudgedFile, [...nudged, ...fresh.map((p) => p.key)]);
       return { block: formatNudge(fresh) };
     }

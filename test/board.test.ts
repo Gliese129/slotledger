@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { Board, FixableError } from "../src/board.js";
 import { Store } from "../src/store.js";
 import { startWeb } from "../src/web.js";
+import { validateSettings, writeSettings } from "../src/settings.js";
 
 let root: string;
 let board: Board;
@@ -207,5 +208,45 @@ describe("web view", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("recording settings", () => {
+  it("until language and strictness are set, brief asks the AI to ask the user", () => {
+    const brief = board.brief();
+    expect(brief).toContain("language and strictness not set");
+    expect(brief).toContain("Which language should decisions");
+    expect(brief).toContain("config --language");
+    writeSettings(root, { language: "中文", strictness: "strict" });
+    const after = board.brief();
+    expect(after).not.toContain("not set");
+    expect(after).toContain("write slot values, rationales, task titles and questions in 中文");
+    expect(after).toContain("Strictness: strict");
+  });
+
+  it("writeSettings keeps topics and rejects unknown strictness", () => {
+    writeSettings(root, { strictness: "loose" });
+    const cfg = new Store(root).readConfig();
+    expect(cfg.topics).toHaveLength(1);
+    expect(cfg.strictness).toBe("loose");
+    expect(validateSettings({ strictness: "medium" })).toContain("strict, balanced, loose");
+  });
+
+  it("loose never interrupts the AI; findings go to the report", () => {
+    writeSettings(root, { language: "English", strictness: "loose" });
+    start("s1");
+    write("src/sync/icloud.ts", "x\n");
+    const r = board.stop("s1", false);
+    expect(r.block).toBeUndefined();
+    expect(r.message).toContain("sync");
+  });
+
+  it("strict nudges about implemented but unverified tasks", () => {
+    start("s1");
+    board.task("s1", { slug: "add-sync", title: "Add sync", status: "implemented" });
+    expect(board.stop("s1", false).block).toBeUndefined();
+    writeSettings(root, { language: "English", strictness: "strict" });
+    start("s2");
+    expect(board.stop("s2", false).block).toContain("add-sync is implemented but not verified");
   });
 });

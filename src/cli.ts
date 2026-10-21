@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { Board } from "./board.js";
 import { startServer } from "./server.js";
 import { linkSession } from "./session.js";
+import { STRICTNESS_GUIDE, configCommand, isConfigured, validateSettings, writeSettings, type SettingsInput } from "./settings.js";
 import { Store, resolveRoot } from "./store.js";
+import { STRICTNESS, type Config } from "./types.js";
 import { openBrowser, startWeb } from "./web.js";
 
 interface HookInput {
@@ -74,7 +76,38 @@ function appendLine(path: string, line: string): void {
   writeFileSync(path, cur + (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
 }
 
-function init(target: string): void {
+function flags(args: string[]): { positional: string[]; get: (name: string) => string | undefined } {
+  const positional: string[] = [];
+  const named = new Map<string, string>();
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith("--")) named.set(args[i], args[++i]);
+    else positional.push(args[i]);
+  }
+  return { positional, get: (name) => named.get(name) };
+}
+
+function settingsFrom(f: ReturnType<typeof flags>): SettingsInput {
+  const input = { language: f.get("--language"), strictness: f.get("--strictness") };
+  const err = validateSettings(input);
+  if (err) {
+    console.error(err);
+    process.exit(1);
+  }
+  return input;
+}
+
+function settingsSummary(config: Config): string {
+  if (isConfigured(config)) return `- Recording: language ${config.language}, strictness ${config.strictness}`;
+  return [
+    "- Not set yet: " + [!config.language && "language", !config.strictness && "strictness"].filter(Boolean).join(", "),
+    "  Ask the user which language records should be written in and how strict recording should be",
+    `  (${STRICTNESS.map((s) => `${s}: ${STRICTNESS_GUIDE[s].summary}`).join("; ")}), then run:`,
+    `  ${configCommand()}`,
+    "  Until then, each session's brief asks the AI to do this.",
+  ].join("\n");
+}
+
+function init(target: string, settings: SettingsInput): void {
   const root = resolveRoot(resolve(target));
   const self = fileURLToPath(import.meta.url);
   // Use node by absolute path: hooks and the MCP server may not have node on PATH (e.g. nvm only applies in interactive shells)
@@ -84,6 +117,7 @@ function init(target: string): void {
   mkdirSync(join(root, ".project"), { recursive: true });
   const cfg = join(root, ".project", "config.json");
   if (!existsSync(cfg)) writeFileSync(cfg, JSON.stringify({ topics: [], acceptAfterSessions: 3 }, null, 2) + "\n");
+  const config = writeSettings(root, settings);
   appendLine(join(root, ".gitattributes"), ".project/events.jsonl merge=union");
   appendLine(join(root, ".gitignore"), ".project/run/");
 
@@ -107,7 +141,8 @@ function init(target: string): void {
 - .project/config.json: define topics and their paths for more accurate undeclared-change checks
 - .mcp.json, .claude/settings.json: the MCP server and hooks
 - Consider copying skill/SKILL.md to .claude/skills/slotboard/
-- Run \`slotboard web\` to view the project state in a browser`);
+- Run \`slotboard web\` to view the project state in a browser
+${settingsSummary(config)}`);
 }
 
 const [sub, arg] = process.argv.slice(2);
@@ -116,7 +151,14 @@ if (!sub || sub === "serve") {
 } else if (sub === "hook") {
   await hook(arg);
 } else if (sub === "init") {
-  init(arg ?? process.cwd());
+  const f = flags(process.argv.slice(3));
+  init(f.positional[0] ?? process.cwd(), settingsFrom(f));
+} else if (sub === "config") {
+  const f = flags(process.argv.slice(3));
+  const input = settingsFrom(f);
+  const root = resolveRoot(f.positional[0] ? resolve(f.positional[0]) : undefined);
+  const config = input.language || input.strictness ? writeSettings(root, input) : new Store(root).readConfig();
+  console.log(settingsSummary(config));
 } else if (sub === "status") {
   const board = new Board(new Store(resolveRoot()));
   board.writeStatus();
@@ -130,6 +172,6 @@ if (!sub || sub === "serve") {
   console.log(`slotboard web: ${url}  (read-only; Ctrl+C to stop)`);
   if (args.includes("--open")) openBrowser(url);
 } else {
-  console.error("Usage: slotboard [serve] | init [dir] | status | web [--port N] [--open] | hook <session-start|prompt|stop|session-end>");
+  console.error("Usage: slotboard [serve] | init [dir] [--language L] [--strictness strict|balanced|loose] | config [--language L] [--strictness S] | status | web [--port N] [--open] | hook <session-start|prompt|stop|session-end>");
   process.exit(1);
 }

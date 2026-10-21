@@ -1,7 +1,9 @@
 import type { Analysis } from "./analyze.js";
 import type { QuestionState, SlotState, State, VersionState } from "./fold.js";
 import type { AnyEvent, Category, SlotKey } from "./types.js";
+import type { Config, Strictness } from "./types.js";
 import { CATEGORIES, GUARDED } from "./types.js";
+import { settingsBrief } from "./settings.js";
 
 const STATUS_LABEL: Record<VersionState["status"], string> = {
   decided: "decided",
@@ -35,9 +37,10 @@ export function questionsForUser(state: State): QuestionState[] {
 }
 
 /** Current state for the AI (injected at SessionStart, and the brief tool) */
-export function renderBrief(state: State, errors = 0): string {
+export function renderBrief(state: State, config: Config, errors = 0): string {
   const lines: string[] = ["# slotboard project state"];
   if (errors) lines.push(`⚠ slotboard failed to sync ${errors} time(s) (.project/run/errors.log); some records may be missing.`);
+  lines.push("", ...settingsBrief(config));
 
   const slots = live(state);
   if (slots.length) {
@@ -216,7 +219,7 @@ export interface NudgePart {
   text: string;
 }
 
-export function buildNudge(state: State, analysis: Analysis | null): NudgePart[] {
+export function buildNudge(state: State, analysis: Analysis | null, strictness: Strictness = "balanced"): NudgePart[] {
   const parts: NudgePart[] = [];
   if (analysis) {
     for (const u of analysis.undeclared) {
@@ -236,6 +239,9 @@ export function buildNudge(state: State, analysis: Analysis | null): NudgePart[]
   for (const t of state.tasks.values()) {
     if (t.needsReview.length && t.status !== "dropped" && t.status !== "verified") {
       parts.push({ key: `task:${t.slug}:${t.needsReview.map((d) => `${d.key}@${d.current}`).join(",")}`, text: `Decisions that task ${t.slug} is based on changed (${t.needsReview.map((d) => d.key).join(", ")}). Check it should still be done; if not, mark it dropped with task.` });
+    }
+    if (strictness === "strict" && t.status === "implemented") {
+      parts.push({ key: `unverified:${t.slug}`, text: `Task ${t.slug} is implemented but not verified. Run verify with a command that proves it works, or say why it can't be verified yet.` });
     }
   }
   return parts;

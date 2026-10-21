@@ -78,9 +78,16 @@ export interface Topic {
   paths: string[];
 }
 
+export const STRICTNESS = ["strict", "balanced", "loose"] as const;
+export type Strictness = (typeof STRICTNESS)[number];
+
 export interface Config {
   topics: Topic[];
   acceptAfterSessions: number;
+  /** Language the AI writes records in; unset until the user is asked */
+  language?: string;
+  /** How much the AI is asked to record; unset until the user is asked (behaves as balanced) */
+  strictness?: Strictness;
 }
 
 export function categoryOf(key: string): Category | null {
