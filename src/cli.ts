@@ -6,6 +6,7 @@ import { Board } from "./board.js";
 import { startServer } from "./server.js";
 import { linkSession } from "./session.js";
 import { Store, resolveRoot } from "./store.js";
+import { openBrowser, startWeb } from "./web.js";
 
 interface HookInput {
   session_id: string;
@@ -53,10 +54,10 @@ async function hook(event: string): Promise<void> {
         board.sessionEnd(session);
         break;
       default:
-        throw new Error(`未知 hook：${event}`);
+        throw new Error(`Unknown hook: ${event}`);
     }
   } catch (err) {
-    // 工具故障时放行：hook 出错绝不阻塞 CC
+    // Fail open: a hook error must never block CC
     store.logError(`hook:${event}`, err);
   }
 }
@@ -76,7 +77,7 @@ function appendLine(path: string, line: string): void {
 function init(target: string): void {
   const root = resolveRoot(resolve(target));
   const self = fileURLToPath(import.meta.url);
-  // 用绝对路径的 node：hook 和 MCP server 的 PATH 不一定有 node（比如 nvm 只在交互 shell 里生效）
+  // Use node by absolute path: hooks and the MCP server may not have node on PATH (e.g. nvm only applies in interactive shells)
   const node = process.execPath;
   const cmd = (sub: string) => `${JSON.stringify(node)} ${JSON.stringify(self)} hook ${sub}`;
 
@@ -102,10 +103,11 @@ function init(target: string): void {
     return { ...c, hooks: h, enabledMcpjsonServers: [...new Set([...(c.enabledMcpjsonServers ?? []), "slotboard"])], permissions: { ...(c.permissions ?? {}), allow: [...allow] } };
   });
 
-  console.log(`slotboard 已接入 ${root}
-- .project/config.json：在 topics 里配置主题和路径，未声明改动检查会更准
-- .mcp.json、.claude/settings.json：MCP server 与 hooks
-- 建议把 skill/SKILL.md 复制到 .claude/skills/slotboard/`);
+  console.log(`slotboard is set up in ${root}
+- .project/config.json: define topics and their paths for more accurate undeclared-change checks
+- .mcp.json, .claude/settings.json: the MCP server and hooks
+- Consider copying skill/SKILL.md to .claude/skills/slotboard/
+- Run \`slotboard web\` to view the project state in a browser`);
 }
 
 const [sub, arg] = process.argv.slice(2);
@@ -119,7 +121,15 @@ if (!sub || sub === "serve") {
   const board = new Board(new Store(resolveRoot()));
   board.writeStatus();
   console.log(board.brief());
+} else if (sub === "web") {
+  const args = process.argv.slice(3);
+  const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  const port = flag("--port");
+  const board = new Board(new Store(resolveRoot()));
+  const { url } = await startWeb(board, { port: port ? Number(port) : undefined, host: flag("--host") });
+  console.log(`slotboard web: ${url}  (read-only; Ctrl+C to stop)`);
+  if (args.includes("--open")) openBrowser(url);
 } else {
-  console.error("用法：slotboard [serve] | init [dir] | status | hook <session-start|prompt|stop|session-end>");
+  console.error("Usage: slotboard [serve] | init [dir] | status | web [--port N] [--open] | hook <session-start|prompt|stop|session-end>");
   process.exit(1);
 }

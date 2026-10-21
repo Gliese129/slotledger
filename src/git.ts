@@ -14,7 +14,7 @@ function git(root: string, args: string[], env?: NodeJS.ProcessEnv): string {
   }).trim();
 }
 
-/** 工作区快照：用临时 index，不动用户暂存区。不是 git 仓库时返回 null。 */
+/** Working-tree snapshot through a temporary index, leaving the user's staging area alone. Null outside a git repo. */
 export function snapshot(root: string): Snapshot | null {
   const dir = mkdtempSync(join(tmpdir(), "slotboard-"));
   try {

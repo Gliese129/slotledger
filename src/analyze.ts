@@ -22,14 +22,14 @@ const isDoc = (p: string) => /\.(md|mdx)$/i.test(p);
 export interface Analysis {
   changes: Change[];
   undeclared: { topic: string; files: string[] }[];
-  /** 没配主题时的粗提示：改了代码但本 session 没记录任何决定 */
+  /** Coarse hint when no topics are configured: code changed but this session recorded no decision */
   coarse?: { files: number };
   newDocs: string[];
   depManifests: string[];
   schemaUndeclared: string[];
 }
 
-/** 槽位所属主题：显式 topics，加上 key 名里出现的主题 id */
+/** A slot's topics: explicit topics plus any topic id that appears in the key name */
 export function slotTopics(slot: SlotState, topics: Topic[]): string[] {
   const name = slot.key.split("/").slice(1).join("/");
   const inferred = topics.filter((t) => name.split(/[-_/.]/).includes(t.id) || name === t.id).map((t) => t.id);

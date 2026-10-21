@@ -17,7 +17,7 @@ const B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 let lastTime = 0;
 let lastRand: number[] = [];
 
-/** ULID，同一毫秒内单调递增，保证事件 ID 可排序 */
+/** ULID, monotonic within the same millisecond so event IDs sort */
 export function ulid(now = Date.now()): string {
   let rand: number[];
   if (now === lastTime) {
@@ -57,16 +57,16 @@ export class Store {
     const out: AnyEvent[] = [];
     for (const line of readFileSync(this.eventsPath, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      try { out.push(JSON.parse(line)); } catch { /* 坏行跳过，不让一行损坏拖垮全部 */ }
+      try { out.push(JSON.parse(line)); } catch { /* skip bad lines so one corrupt line can't take down the rest */ }
     }
-    // merge=union 合并后行序可能乱，按 ULID 排回时间顺序
+    // merge=union can scramble line order; sort back into time order by ULID
     return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   append<T extends EventType>(type: T, actor: Actor, data: EventDataMap[T], cause?: string): AnyEvent {
     mkdirSync(this.dir, { recursive: true });
     const ev = { id: ulid(), type, at: new Date().toISOString(), actor, ...(cause ? { cause } : {}), data } as AnyEvent;
-    // 一行一次 O_APPEND 写入，多进程并发追加不会交错
+    // one O_APPEND write per line, so concurrent appends from several processes never interleave
     appendFileSync(this.eventsPath, JSON.stringify(ev) + "\n");
     return ev;
   }
@@ -93,13 +93,13 @@ export class Store {
     writeFileSync(join(this.runDir, name), JSON.stringify(value, null, 2));
   }
 
-  /** 工具故障时放行：记下错误，brief 里提示"未同步" */
+  /** Fail open: log the error, and brief reports "not synced" */
   logError(where: string, err: unknown): void {
     try {
       mkdirSync(this.runDir, { recursive: true });
       const msg = err instanceof Error ? err.stack ?? err.message : String(err);
       appendFileSync(join(this.runDir, "errors.log"), `${new Date().toISOString()} [${where}] ${msg}\n`);
-    } catch { /* 连日志都写不了就算了 */ }
+    } catch { /* can't even write the log; give up */ }
   }
 
   errorCount(): number {

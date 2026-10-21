@@ -58,7 +58,7 @@ export interface QuestionState {
   status: "open" | "answered";
   session?: string;
   at: string;
-  // stale_premise 专用
+  // stale_premise only
   premise?: { slot: SlotKey; n: number; dep: StaleDep };
 }
 
@@ -86,7 +86,7 @@ export function staleQuestionId(slot: SlotKey, n: number, dep: SlotKey, depN: nu
   return "sq-" + shortHash(`${slot}@${n}|${dep}@${depN}`);
 }
 
-/** 按顺序折叠事件得到当前状态。所有判断（stale、确认状态、过期前提问题）都在这里推算，不存储。 */
+/** Fold events in order into the current state. Every judgment (stale, confirmation status, stale-premise questions) is derived here, never stored. */
 export function fold(events: AnyEvent[], config: Config): State {
   const slots = new Map<SlotKey, SlotState>();
   const tasks = new Map<string, TaskState>();
@@ -186,7 +186,7 @@ export function fold(events: AnyEvent[], config: Config): State {
     }
   }
 
-  // 确认状态
+  // Confirmation status
   for (const slot of slots.values()) {
     for (const v of slot.versions) {
       if (v.rejected) v.status = "rejected";
@@ -203,7 +203,7 @@ export function fold(events: AnyEvent[], config: Config): State {
   const staleOf = (deps: Dep[]) =>
     deps.filter((d) => currentN(d.key) !== d.n).map((d) => ({ key: d.key, locked: d.n, current: currentN(d.key) }));
 
-  // stale 与由过期前提生成的问题
+  // Stale markers, and the questions generated from stale premises
   for (const slot of slots.values()) {
     const cur = slot.current;
     if (!cur || cur.retired) continue;
@@ -215,16 +215,16 @@ export function fold(events: AnyEvent[], config: Config): State {
       const newV = depSlot?.current;
       const change = newV
         ? newV.retired
-          ? `已作废（原为「${oldV?.value ?? "?"}」）`
-          : `已从「${oldV?.value ?? "?"}」变为「${newV.value}」`
-        : "已被否决";
+          ? `was retired (it was "${oldV?.value ?? "?"}")`
+          : `changed from "${oldV?.value ?? "?"}" to "${newV.value}"`
+        : "was rejected";
       questions.set(qid, {
         qid,
         about: [slot.key, dep.key],
-        text: `${slot.key} 目前是「${cur.value}」，理由是：${cur.rationale}。但它依赖的 ${dep.key} ${change}。这个决定还成立吗？`,
+        text: `${slot.key} is currently "${cur.value}" because: ${cur.rationale}. But ${dep.key}, which it depends on, ${change}. Does this decision still hold?`,
         options: [
-          { id: "A", label: "仍然成立，保持不变" },
-          { id: "B", label: "需要重新决定" },
+          { id: "A", label: "Still holds, keep it" },
+          { id: "B", label: "Needs a new decision" },
         ],
         origin: "stale_premise",
         status: "open",
@@ -234,7 +234,7 @@ export function fold(events: AnyEvent[], config: Config): State {
     }
   }
 
-  // 任务基于的决定本身前提已变，也要复查（如 MSI 安装包基于 Windows 平台，而平台的前提已变）
+  // A task also needs review when a decision it is based on has a stale premise (e.g. an MSI installer based on the Windows platform, whose premise changed)
   for (const t of tasks.values()) {
     const direct = staleOf(t.basedOn);
     const indirect = t.basedOn
@@ -247,7 +247,7 @@ export function fold(events: AnyEvent[], config: Config): State {
   return { slots, tasks, questions, sessions };
 }
 
-/** 依赖 key 的所有当前生效槽位 */
+/** Every live slot whose current version depends on key */
 export function dependentsOf(state: State, key: SlotKey): SlotState[] {
   return [...state.slots.values()].filter((s) => s.current && !s.current.retired && s.current.depends.some((d) => d.key === key));
 }

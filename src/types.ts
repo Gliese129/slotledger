@@ -2,14 +2,14 @@ export const CATEGORIES = ["product", "arch", "platform", "assum", "dep", "const
 export type Category = (typeof CATEGORIES)[number];
 export type SlotKey = `${Category}/${string}`;
 
-// 醒目显示、需要人看的分类
+// Categories shown prominently, for a human to look at
 export const PROMINENT: Category[] = ["product", "arch", "platform"];
-// 推翻用户决定时真正停下的分类
+// Categories where overriding a user's decision actually stops
 export const GUARDED: Category[] = ["product", "arch"];
 
 export type Actor =
   | { kind: "agent"; session: string }
-  | { kind: "human"; via?: string } // via：由哪个 session 的 AI 转述
+  | { kind: "human"; via?: string } // via: the session whose AI relayed it
   | { kind: "system"; session?: string };
 
 export interface Snapshot {

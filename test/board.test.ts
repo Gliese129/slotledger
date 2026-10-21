@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Board, FixableError } from "../src/board.js";
 import { Store } from "../src/store.js";
+import { startWeb } from "../src/web.js";
 
 let root: string;
 let board: Board;
@@ -35,56 +36,56 @@ beforeEach(() => {
 
 function seedWindowsWorld() {
   start("s1");
-  board.record("s1", { key: "assum/user-os", value: "用户都用 Windows", rationale: "访谈结果", userQuote: "我们用户都是 Windows" });
-  board.record("s1", { key: "arch/sync-backend", value: "OneDrive", rationale: "用户都用 Windows，OneDrive 自带", depends: ["assum/user-os"], userQuote: "那就 OneDrive 吧" });
-  board.record("s1", { key: "platform/target-os", value: "Windows 10+", rationale: "跟随用户系统", depends: ["assum/user-os"] });
+  board.record("s1", { key: "assum/user-os", value: "Users are all on Windows", rationale: "From interviews", userQuote: "our users are all on Windows" });
+  board.record("s1", { key: "arch/sync-backend", value: "OneDrive", rationale: "Users are on Windows, which ships OneDrive", depends: ["assum/user-os"], userQuote: "OneDrive then" });
+  board.record("s1", { key: "platform/target-os", value: "Windows 10+", rationale: "Follow the users' OS", depends: ["assum/user-os"] });
 }
 
-describe("槽位与 stale", () => {
-  it("实现细节不建槽位", () => {
+describe("slots and staleness", () => {
+  it("implementation details get no slot", () => {
     start("s1");
-    expect(board.record("s1", { key: "impl/rename-var", value: "x", rationale: "y" })).toContain("无需记录");
+    expect(board.record("s1", { key: "impl/rename-var", value: "x", rationale: "y" })).toContain("Nothing recorded");
     expect(board.load().state.slots.size).toBe(0);
   });
 
-  it("前提变化后依赖方被标 stale，arch 进入需要你确认", () => {
+  it("a changed premise marks dependents stale, and arch goes to Needs your call", () => {
     seedWindowsWorld();
     start("s2");
-    const msg = board.record("s2", { key: "assum/user-os", value: "用户其实用 macOS", rationale: "用户纠正", userQuote: "用户其实用 macOS" });
-    expect(msg).toContain("有 2 条决定依赖它");
+    const msg = board.record("s2", { key: "assum/user-os", value: "Users are actually on macOS", rationale: "User corrected it", userQuote: "users are actually on macOS" });
+    expect(msg).toContain("2 decision(s) depend on it");
 
     const { state } = board.load();
     expect(state.slots.get("arch/sync-backend")!.stale).toEqual([{ key: "assum/user-os", locked: 1, current: 2 }]);
 
     const r = board.stop("s2", true);
-    expect(r.message).toContain("需要你确认（1 项");
+    expect(r.message).toContain("Needs your call (1;");
     expect(r.message).toContain("arch/sync-backend");
-    expect(r.message).toContain('直接回复"1A"');
+    expect(r.message).toContain('Just reply "1A"');
   });
 
-  it("非 arch/product 的 stale 由 AI 自查：Stop 先提醒一次", () => {
+  it("non-arch/product staleness is reviewed by the AI: Stop nudges once", () => {
     seedWindowsWorld();
     start("s2");
-    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "纠正", userQuote: "其实是 macOS" });
+    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
     const first = board.stop("s2", false);
     expect(first.block).toContain("platform/target-os");
-    // 同样的内容不再提醒
+    // the same content is not nudged again
     expect(board.stop("s2", false).block).toBeUndefined();
   });
 
-  it("推翻用户的 arch 决定会停下，带 userQuote 才放行", () => {
+  it("overriding a user's arch decision stops unless userQuote is given", () => {
     seedWindowsWorld();
     start("s2");
-    expect(() => board.record("s2", { key: "arch/sync-backend", value: "iCloud", rationale: "macOS 上更顺" })).toThrow(FixableError);
-    expect(board.record("s2", { key: "arch/sync-backend", value: "iCloud", rationale: "用户同意", depends: ["assum/user-os"], userQuote: "换 iCloud 吧" })).toContain("v2");
+    expect(() => board.record("s2", { key: "arch/sync-backend", value: "iCloud", rationale: "Smoother on macOS" })).toThrow(FixableError);
+    expect(board.record("s2", { key: "arch/sync-backend", value: "iCloud", rationale: "User agreed", depends: ["assum/user-os"], userQuote: "switch to iCloud" })).toContain("v2");
   });
 
-  it("respond 1A：确认仍成立，锁定新依赖版本，stale 消失", () => {
+  it("respond 1A: confirms it still holds, locks the new dependency version, clears stale", () => {
     seedWindowsWorld();
     start("s2");
-    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "纠正", userQuote: "其实是 macOS" });
+    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
     board.stop("s2", true);
-    expect(board.respond("s2", { item: 1, choice: "A", userQuote: "1A" })).toContain("仍然成立");
+    expect(board.respond("s2", { item: 1, choice: "A", userQuote: "1A" })).toContain("still holds");
     const { state } = board.load();
     const slot = state.slots.get("arch/sync-backend")!;
     expect(slot.stale).toEqual([]);
@@ -92,90 +93,119 @@ describe("槽位与 stale", () => {
     expect(slot.current!.status).toBe("decided");
   });
 
-  it("值没变时不重复记", () => {
+  it("an unchanged value is not recorded again", () => {
     seedWindowsWorld();
-    expect(board.record("s1", { key: "platform/target-os", value: "Windows 10+", rationale: "同上" })).toContain("没有变化");
+    expect(board.record("s1", { key: "platform/target-os", value: "Windows 10+", rationale: "Same" })).toContain("is unchanged");
   });
 
-  it("连续 N 个 session 未否决则默认接受", () => {
+  it("accepted by default after N sessions without rejection", () => {
     start("s1");
-    board.record("s1", { key: "product/autostart", value: "默认关闭", rationale: "保守" });
+    board.record("s1", { key: "product/autostart", value: "Off by default", rationale: "Conservative" });
     for (const s of ["s2", "s3"]) start(s);
     expect(board.load().state.slots.get("product/autostart")!.current!.status).toBe("proposed");
     start("s4");
     expect(board.load().state.slots.get("product/autostart")!.current!.status).toBe("accepted_by_default");
   });
 
-  it("撤回替用户做的决定并给替代值", () => {
+  it("withdraws a decision made for the user, with a replacement", () => {
     start("s1");
-    board.record("s1", { key: "product/autostart", value: "默认开启", rationale: "方便" });
+    board.record("s1", { key: "product/autostart", value: "On by default", rationale: "Convenient" });
     const r = board.stop("s1", true);
-    expect(r.message).toContain("我先替你做了决定");
-    board.respond("s1", { item: 1, withdraw: true, text: "默认关闭", userQuote: "撤回 1，默认关" });
+    expect(r.message).toContain("Decisions I made for you");
+    board.respond("s1", { item: 1, withdraw: true, text: "Off by default", userQuote: "withdraw 1, keep it off" });
     const v = board.load().state.slots.get("product/autostart")!.current!;
-    expect(v.value).toBe("默认关闭");
+    expect(v.value).toBe("Off by default");
     expect(v.source).toBe("user");
   });
 });
 
-describe("改动分析", () => {
-  it("改了主题代码却没记录：先提醒 AI，再告诉用户", () => {
+describe("change analysis", () => {
+  it("topic code changed with nothing recorded: nudge the AI first, then tell the user", () => {
     start("s1");
     write("src/sync/icloud.ts", "export const backend = 'icloud'\n");
     const first = board.stop("s1", false);
-    expect(first.block).toContain("主题 sync");
+    expect(first.block).toContain("topic sync");
     const second = board.stop("s1", true);
-    expect(second.message).toContain("改动了 sync 相关代码");
+    expect(second.message).toContain("Code for sync changed");
   });
 
-  it("记录了相关槽位就不算未声明（按 key 名推断主题）", () => {
+  it("recording a related slot counts as declared (topic inferred from the key name)", () => {
     start("s1");
     write("src/sync/icloud.ts", "x\n");
-    board.record("s1", { key: "arch/sync-backend", value: "iCloud", rationale: "试试" });
-    expect(board.stop("s1", false).block ?? "").not.toContain("主题 sync");
+    board.record("s1", { key: "arch/sync-backend", value: "iCloud", rationale: "Try it" });
+    expect(board.stop("s1", false).block ?? "").not.toContain("topic sync");
   });
 
-  it("开始前就有的未提交改动不算进本 session", () => {
+  it("uncommitted changes from before the session don't count toward it", () => {
     write("src/sync/dirty.ts", "x\n");
     start("s1");
     expect(board.stop("s1", false).block).toBeUndefined();
   });
 
-  it("新增文档被指出，STATUS.md 不算", () => {
+  it("new documents are pointed out; STATUS.md doesn't count", () => {
     start("s1");
     write("PLAN.md", "# plan\n");
     expect(board.stop("s1", false).block).toContain("PLAN.md");
-    expect(board.stop("s1", true).message).toContain("本次新增了文档：PLAN.md");
+    expect(board.stop("s1", true).message).toContain("New documents this session: PLAN.md");
   });
 });
 
-describe("任务与验证", () => {
-  it("verify 由 server 执行，失败不改状态", () => {
+describe("tasks and verification", () => {
+  it("verify runs in the server and a failure leaves the status alone", () => {
     start("s1");
-    board.task("s1", { slug: "add-sync", title: "加同步", status: "implemented" });
+    board.task("s1", { slug: "add-sync", title: "Add sync", status: "implemented" });
     expect(() => board.task("s1", { slug: "add-sync", status: "verified" as any })).toThrow(FixableError);
-    expect(board.verify("s1", "add-sync", "exit 3")).toContain("失败");
+    expect(board.verify("s1", "add-sync", "exit 3")).toContain("Failed");
     expect(board.load().state.tasks.get("add-sync")!.status).toBe("implemented");
-    expect(board.verify("s1", "add-sync", "echo ok")).toContain("通过");
+    expect(board.verify("s1", "add-sync", "echo ok")).toContain("Passed");
     expect(board.load().state.tasks.get("add-sync")!.status).toBe("verified");
-    expect(readFileSync(join(root, "STATUS.md"), "utf8")).toContain("`echo ok` 通过");
+    expect(readFileSync(join(root, "STATUS.md"), "utf8")).toContain("`echo ok` passed");
   });
 
-  it("任务基于的决定前提已变，也要复查", () => {
+  it("a task needs review when a decision it is based on has a stale premise", () => {
     seedWindowsWorld();
-    board.task("s1", { slug: "msi-installer", title: "做 MSI 安装包", basedOn: ["platform/target-os"] });
+    board.task("s1", { slug: "msi-installer", title: "Build the MSI installer", basedOn: ["platform/target-os"] });
     start("s2");
-    const msg = board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "纠正", userQuote: "其实是 macOS" });
-    expect(msg).not.toContain("可能的前提：platform/target-os");
+    const msg = board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
+    expect(msg).not.toContain("Possible premises: platform/target-os");
     expect(board.load().state.tasks.get("msi-installer")!.needsReview).toHaveLength(1);
   });
 
-  it("任务基于的决定变了就需要复查", () => {
+  it("a task needs review when a decision it is based on changes", () => {
     seedWindowsWorld();
-    board.task("s1", { slug: "msi-installer", title: "做 MSI 安装包", basedOn: ["platform/target-os"] });
+    board.task("s1", { slug: "msi-installer", title: "Build the MSI installer", basedOn: ["platform/target-os"] });
     start("s2");
-    board.record("s2", { key: "platform/target-os", value: "macOS 13+", rationale: "用户用 macOS", userQuote: "做 mac 版" });
+    board.record("s2", { key: "platform/target-os", value: "macOS 13+", rationale: "Users are on macOS", userQuote: "make a mac version" });
     expect(board.load().state.tasks.get("msi-installer")!.needsReview).toHaveLength(1);
-    expect(board.brief()).toContain("msi-installer [todo] 做 MSI 安装包 ⚠ 基于的决定已变");
+    expect(board.brief()).toContain("msi-installer [todo] Build the MSI installer ⚠ based on changed decisions");
+  });
+});
+
+describe("web view", () => {
+  it("serves the page and live state, with 304 until events change", async () => {
+    seedWindowsWorld();
+    start("s2");
+    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
+    const { server, url } = await startWeb(board, { port: 0 });
+    try {
+      const page = await fetch(url);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("<title>slotboard</title>");
+
+      const r = await fetch(url + "api/state");
+      const etag = r.headers.get("etag")!;
+      const body = await r.json();
+      const sync = body.slots.find((s: any) => s.key === "arch/sync-backend");
+      expect(sync.stale).toEqual([{ key: "assum/user-os", locked: 1, current: 2 }]);
+      expect(body.slots.find((s: any) => s.key === "assum/user-os").dependents).toEqual(["arch/sync-backend", "platform/target-os"]);
+      expect(body.questions.filter((q: any) => q.forUser).map((q: any) => q.about[0])).toEqual(["arch/sync-backend"]);
+
+      expect((await fetch(url + "api/state", { headers: { "If-None-Match": etag } })).status).toBe(304);
+      board.task("s2", { slug: "x", title: "X" });
+      expect((await fetch(url + "api/state", { headers: { "If-None-Match": etag } })).status).toBe(200);
+      expect((await fetch(url + "nope")).status).toBe(404);
+    } finally {
+      server.close();
+    }
   });
 });

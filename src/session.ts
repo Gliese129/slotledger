@@ -1,8 +1,8 @@
 import type { Store } from "./store.js";
 
 /**
- * hook 和 MCP server 都是同一个 CC 进程的子进程，CC 会注入 CLAUDE_PID。
- * SessionStart hook 把 session_id 写到 run/session-<CLAUDE_PID>.json，server 按同一个 pid 读。
+ * Hooks and the MCP server are both children of the same CC process, and CC injects CLAUDE_PID.
+ * The SessionStart hook writes session_id to run/session-<CLAUDE_PID>.json; the server reads it by the same pid.
  */
 export function ownerPid(): string {
   return process.env.CLAUDE_PID ?? String(process.ppid);
@@ -12,7 +12,7 @@ export function linkSession(store: Store, session: string): void {
   store.writeRun(`session-${ownerPid()}.json`, { session, at: new Date().toISOString() });
 }
 
-/** 读不到关联文件时退回环境变量，再退回连接 ID */
+/** Without a link file, fall back to the env var, then to the connection ID */
 export function currentSession(store: Store, connectionId: string): { id: string; via: "hook" | "env" | "connection" } {
   const linked = store.readRun<{ session: string }>(`session-${ownerPid()}.json`);
   if (linked?.session) return { id: linked.session, via: "hook" };

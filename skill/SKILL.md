@@ -1,53 +1,55 @@
 ---
 name: slotboard
-description: 项目里有 slotboard MCP（record/task/verify/ask/respond/brief 工具）时，用它记录决定、计划和任务，而不是写 PLAN/TODO/handoff 文档。做决定、改方案、发现前提变化、开始或完成工作、用户回复汇报编号时使用。
+description: When the project has the slotboard MCP (record/task/verify/ask/respond/brief tools), use it to record decisions, plans, and tasks instead of writing PLAN/TODO/handoff documents. Use it when making a decision, changing an approach, noticing a premise has changed, starting or finishing work, or when the user replies to report numbers.
 ---
 
-# 用 slotboard 记录项目状态
+# Recording project state with slotboard
 
-slotboard 把决定记成带版本的槽位。每个决定写明理由和前提，前提变了，依赖它的决定会被自动标记。它不会拦你，按下面做就行。
+slotboard stores decisions as versioned slots. Each decision states its rationale and premises; when a premise changes, the decisions that depend on it are flagged automatically. It won't block you; just follow the steps below.
 
-## 什么时候 record
+## When to record
 
-做出或改变以下决定时，立刻 record，不要等到最后：
+Record as soon as you make or change one of these decisions, not at the end:
 
-| 分类 | 什么算 | 例子 |
+| Category | What counts | Example |
 |---|---|---|
-| product | 用户能感知的行为、默认值 | `product/autostart-default` 默认关闭 |
-| arch | 方案选型、数据格式、对外接口 | `arch/sync-backend` 自建服务器 |
-| platform | 目标系统、运行时版本 | `platform/target-os` macOS 13+ |
-| assum | 你或用户依赖的事实判断 | `assum/user-os` 用户都用 macOS |
-| dep | 新增一个库（diff 里也会自动识别） | `dep/better-sqlite3` |
-| constraint | 不能动的东西，必须给 scope | `constraint/no-touch-legacy` |
+| product | Behavior or defaults the user can notice | `product/autostart-default` off by default |
+| arch | Design choices, data formats, external interfaces | `arch/sync-backend` self-hosted server |
+| platform | Target OS, runtime versions | `platform/target-os` macOS 13+ |
+| assum | Facts you or the user are relying on | `assum/user-os` users are all on macOS |
+| dep | A new library (also detected from the diff) | `dep/better-sqlite3` |
+| constraint | Something that must not be touched; needs scope | `constraint/no-touch-legacy` |
 
-变量命名、函数拆分、修 typo 这类实现细节不用记。
+Implementation details like variable names, function splits, or typo fixes don't need recording.
 
-- **写清 rationale。** 前提变了会用它向用户提问。
-- **写 depends。** 这个决定靠哪个假设或平台成立，就依赖谁。record 的返回值会推荐候选。
-- **用户亲口说的，带 userQuote。** 这样才算用户的决定。
-- **改用户定过的 product/arch 会被拒。** 先问用户，同意后带 userQuote 再写。
+- **Write a clear rationale.** It is used to question the user when a premise changes.
+- **Fill in depends.** Depend on whichever assumption or platform the decision rests on. The record result suggests candidates.
+- **If the user said it, include userQuote.** Only then does it count as the user's decision.
+- **Changing a product/arch decision the user made is refused.** Ask the user first; once they agree, write it with userQuote.
 
-## 前提变了怎么办
+## When a premise changes
 
-不要停下来，也不要在代码里悄悄换方案。
+Don't stop, and don't quietly switch approaches in the code.
 
-1. 先把新事实 record 下来，例如 `assum/user-os` 改成 macOS。返回值会列出依赖它的决定。
-2. 平台相关的代码照常改。
-3. arch/product 类的决定会自动进入结尾汇报，交给用户拍板。在用户回答前，不要改这些方案对应的代码。
-4. 其他类别你自己复查：仍成立就用相同的 value 再 record 一次（会锁定新的依赖版本），不成立就改。
+1. Record the new fact first, e.g. change `assum/user-os` to macOS. The result lists the decisions that depend on it.
+2. Change platform-specific code as usual.
+3. arch/product decisions go into the end-of-turn report automatically for the user to decide. Until the user answers, don't change the code behind those decisions.
+4. Review the other categories yourself: if one still holds, record it again with the same value (this locks the new dependency versions); if not, change it.
 
-## 任务
+## Tasks
 
-- `task` 用 slug 管理工作：开始时设 in_progress，写完设 implemented，不做了设 dropped。
-- 完成要靠 `verify`：它会执行命令并留存证据。没跑过的不要说完成，只在某个环境验证过的，要写明环境。
-- 计划、待办直接建成 task，不另写文档。
+- `task` tracks work by slug: set in_progress when you start, implemented when the code is written, dropped if it's abandoned.
+- Done means `verify`: it runs a command and keeps the evidence. Don't call anything done that hasn't been run; if it was only verified in one environment, say which.
+- Turn plans and todos straight into tasks instead of separate documents.
 
-## 提问与回复
+## Questions and replies
 
-- 用户在场时，直接问用户；拿到回答后用 `respond` 记下，question 填 brief 里的问题 ID。
-- 用户不在场时，用 `ask`，问题会出现在结尾汇报里。
-- 用户回复汇报编号时用 `respond`，例如回复"1A"、"撤回 2"。userQuote 填用户原话。
+- If the user is around, ask them directly; record the answer with `respond`, passing the question ID from brief as question.
+- If the user isn't around, use `ask`; the question appears in the end-of-turn report.
+- When the user replies to report numbers, e.g. "1A" or "withdraw 2", use `respond`. userQuote is the user's exact words.
 
-## 结尾
+## Wrapping up
 
-slotboard 会在回合结束时自己生成汇报并显示给用户，你不用复述。如果它提醒你漏记了决定，补上；只是实现细节就直接结束。
+slotboard builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an implementation detail, just finish.
+
+The user can see everything in a browser with `slotboard web`.
