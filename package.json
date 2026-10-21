@@ -1,0 +1,32 @@
+{
+  "name": "slotboard",
+  "version": "0.0.1",
+  "description": "Project-state MCP server for Claude Code / Codex: every AI decision visible, traceable, revocable.",
+  "type": "module",
+  "bin": {
+    "slotboard": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skill"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "picomatch": "^4.0.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/picomatch": "^4.0.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
