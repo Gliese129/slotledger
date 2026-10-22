@@ -1,12 +1,14 @@
 node_modules/
 dist/
 
-# Local, private: slotledger's own project state and this machine's Claude Code setup
+# Local, private: slotledger's own project state and this machine's Claude Code and Codex setup
 .project/
 STATUS.md
 HANDOFF.md
 .claude/
 .mcp.json
+.codex/
+.agents/
 .gitattributes
 research/
 .project/run/
