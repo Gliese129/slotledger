@@ -34,6 +34,10 @@ export interface EventDataMap {
     scope?: string[];
     retired?: boolean;
     userQuote?: string;
+    /** On a retirement written by a merge: the slot that replaces this one */
+    replacedBy?: SlotKey;
+    /** Same decision as version n of this slot, only its dependency keys were re-pointed by a merge */
+    inherit?: number;
   };
   "version.confirmed": { key: SlotKey; n: number; userQuote?: string };
   "version.rejected": { key: SlotKey; n: number; reason: string; replacement?: string };

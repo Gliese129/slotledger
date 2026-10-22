@@ -35,7 +35,8 @@ export function createServer(root = resolveRoot()): McpServer {
   server.registerTool("record", {
     description:
       "Call when you make or change a decision: product behavior, architecture, target platform, an assumption, a new dependency, a constraint. " +
-      "Calling again with the same key creates a new version. Skip implementation details. Decisions the user stated themselves need userQuote." + writeIn,
+      "Calling again with the same key creates a new version, so reuse existing keys (find them with brief({ query })). A new key that looks like an existing one is held back once with the similar keys listed. " +
+      "Skip implementation details. Decisions the user stated themselves need userQuote." + writeIn,
     inputSchema: {
       key: z.string().describe(`<category>/<dashed-name>; categories: ${CATEGORIES.join(" | ")}. E.g. arch/sync-backend, assum/user-os`),
       value: z.string().describe("The decision, in one sentence"),
@@ -45,6 +46,8 @@ export function createServer(root = resolveRoot()): McpServer {
       scope: z.array(z.string()).optional().describe("Required for constraint: the paths or area it covers"),
       retired: z.boolean().optional().describe("true retires this slot"),
       userQuote: z.string().optional().describe("The user's exact words. Only with this does it count as the user's decision"),
+      new: z.boolean().optional().describe("true after the similar-key check, when this really is a separate decision"),
+      replaces: z.array(z.string()).optional().describe("Keys this decision merges in: they are retired, and decisions depending on them are re-pointed to this key"),
     },
   }, (args, extra) => run("record", (s) => board.record(s, args), extra._meta));
 
@@ -91,12 +94,13 @@ export function createServer(root = resolveRoot()): McpServer {
   }, (args, extra) => run("respond", (s) => board.respond(s, args), extra._meta));
 
   server.registerTool("brief", {
-    description: "Show live decisions, stale-premise flags, open questions, and tasks. Call before starting work or when unsure of the current state.",
+    description: "Show live decisions, stale-premise flags, open questions, and tasks. Call before starting work or when unsure of the current state. With query, search decisions (including retired ones) and tasks, e.g. before adding a new key.",
     inputSchema: {
+      query: z.string().optional().describe("Words to search slot keys, values, rationales and tasks for"),
       prompt: z.string().optional().describe("The user's reply, e.g. 1A or withdraw 2, to resolve report numbers when prompt hooks are unavailable"),
     },
     annotations: { readOnlyHint: true },
-  }, (args, extra) => run("brief", (s) => [board.brief(), args.prompt ? board.replyContext(s, args.prompt) : null].filter(Boolean).join("\n\n"), extra._meta));
+  }, (args, extra) => run("brief", (s) => [board.brief(args.query), args.prompt ? board.replyContext(s, args.prompt) : null].filter(Boolean).join("\n\n"), extra._meta));
 
   server.registerTool("checkpoint", {
     description: "Before finishing a turn without lifecycle hooks, check git changes and build the slotboard report. Address any nudge, then call again with continued: true and show the returned report to the user verbatim.",

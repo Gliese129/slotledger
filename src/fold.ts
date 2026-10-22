@@ -12,9 +12,12 @@ export interface VersionState {
   depends: Dep[];
   scope?: string[];
   retired?: boolean;
+  replacedBy?: SlotKey;
   userQuote?: string;
   session?: string;
   at: string;
+  /** When the decision was first proposed; differs from at for versions inherited through a merge */
+  since: string;
   eventId: string;
   confirmed: boolean;
   rejected?: { reason: string };
@@ -121,7 +124,9 @@ export function fold(events: AnyEvent[], config: Config): State {
           slots.set(d.key, slot);
         }
         for (const t of d.topics ?? []) if (!slot.topics.includes(t)) slot.topics.push(t);
-        const source = ev.actor.kind === "human" || d.userQuote ? "user" : "agent";
+        // a re-pointed copy keeps who decided it, whether it was confirmed, and how long it has stood
+        const prev = d.inherit ? slot.versions[d.inherit - 1] : undefined;
+        const source = prev ? prev.source : ev.actor.kind === "human" || d.userQuote ? "user" : "agent";
         slot.versions.push({
           n: slot.versions.length + 1,
           value: d.value,
@@ -130,11 +135,13 @@ export function fold(events: AnyEvent[], config: Config): State {
           depends: d.depends ?? [],
           scope: d.scope,
           retired: d.retired,
-          userQuote: d.userQuote,
-          session: sid,
+          ...(d.replacedBy ? { replacedBy: d.replacedBy } : {}),
+          userQuote: d.userQuote ?? prev?.userQuote,
+          session: prev ? prev.session : sid,
           at: ev.at,
+          since: prev ? prev.since : ev.at,
           eventId: ev.id,
-          confirmed: false,
+          confirmed: prev?.confirmed ?? false,
           status: "proposed",
         });
         if (sid) {
@@ -192,7 +199,7 @@ export function fold(events: AnyEvent[], config: Config): State {
       if (v.rejected) v.status = "rejected";
       else if (v.source === "user" || v.confirmed) v.status = "decided";
       else {
-        const later = new Set(sessionStarts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id));
+        const later = new Set(sessionStarts.filter((s) => s.at > v.since && s.id !== v.session).map((s) => s.id));
         v.status = later.size >= config.acceptAfterSessions ? "accepted_by_default" : "proposed";
       }
     }

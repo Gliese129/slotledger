@@ -6,8 +6,9 @@ import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, type State } from "./fold.js";
 import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
-import { buildNudge, buildReport, formatNudge, renderBrief, renderStatusMd, type Report } from "./report.js";
+import { buildNudge, buildReport, formatNudge, renderBrief, renderSearch, renderStatusMd, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
+import { similarSlots } from "./similar.js";
 import { Store, ulid } from "./store.js";
 import type { Actor, AnyEvent, Dep, QOption, SlotKey, TaskStatus } from "./types.js";
 import { CATEGORIES, GUARDED, categoryOf } from "./types.js";
@@ -26,6 +27,10 @@ export interface RecordInput {
   scope?: string[];
   retired?: boolean;
   userQuote?: string;
+  /** Confirms a new key is a separate decision after the similar-key check */
+  new?: boolean;
+  /** Keys this decision merges in; they are retired and their dependents re-pointed here */
+  replaces?: string[];
 }
 
 export interface TaskInput {
@@ -70,8 +75,10 @@ export class Board {
     return true;
   }
 
-  brief(): string {
-    return renderBrief(this.load().state, this.store.readConfig(), this.store.errorCount());
+  brief(query?: string): string {
+    const { state } = this.load();
+    if (query?.trim()) return renderSearch(state, query.trim());
+    return renderBrief(state, this.store.readConfig(), this.store.errorCount());
   }
 
   export(format: ExportFormat = "markdown"): string {
@@ -105,6 +112,32 @@ export class Board {
 
     const slot = state.slots.get(key);
     const cur = slot?.current;
+
+    const replaces: SlotKey[] = [];
+    for (const r of new Set(input.replaces ?? [])) {
+      if (r === key) throw new FixableError("A slot can't replace itself.");
+      const rs = state.slots.get(r as SlotKey);
+      if (!rs?.current || rs.current.retired) throw new FixableError(`${r} in replaces isn't a live slot. Check the key with brief({ query }).`);
+      if (depends.some((d) => d.key === r)) throw new FixableError(`${key} can't depend on ${r}, which it replaces.`);
+      const userOwned = rs.current.source === "user" || rs.current.confirmed;
+      if (userOwned && GUARDED.includes(rs.category) && !input.userQuote) {
+        throw new FixableError(`${r} is the user's decision (v${rs.current.n} "${rs.current.value}"). Ask the user before merging it away; once they agree, call again with their words in userQuote.`);
+      }
+      replaces.push(r as SlotKey);
+    }
+
+    // A brand-new key that looks like an existing one: ask once instead of silently adding a near-duplicate
+    if (!slot && !input.new && !replaces.length && !input.retired) {
+      const similar = similarSlots(state, { key, value: input.value });
+      if (similar.length) {
+        throw new FixableError([
+          `Not recorded yet: ${key} is a new key, but these live decisions look similar:`,
+          ...similar.map(({ slot: s }) => `- ${s.key} v${s.current!.n} "${s.current!.value}"`),
+          `Same decision: record it under that key instead (that makes a new version). Merging them: pass replaces with the old key(s). A separate decision: call again with new: true.`,
+        ].join("\n"));
+      }
+    }
+
     if (cur) {
       const userOwned = cur.source === "user" || cur.confirmed;
       const changes = cur.value !== input.value || !!input.retired !== !!cur.retired;
@@ -114,19 +147,19 @@ export class Board {
         );
       }
       const sameDeps = JSON.stringify(cur.depends) === JSON.stringify(depends.length ? depends : cur.depends);
-      if (!changes && sameDeps && !slot!.stale.length && JSON.stringify(cur.scope ?? []) === JSON.stringify(input.scope ?? cur.scope ?? []) && !input.userQuote) {
+      if (!changes && sameDeps && !slot!.stale.length && JSON.stringify(cur.scope ?? []) === JSON.stringify(input.scope ?? cur.scope ?? []) && !input.userQuote && !replaces.length) {
         return `${key} is unchanged; nothing recorded.`;
       }
       // Re-confirming after review: same value and no depends given, so keep the old deps locked to their current versions
       if (!depends.length && cur.depends.length) {
         for (const d of cur.depends) {
           const n = state.slots.get(d.key)?.current?.n;
-          if (n) depends.push({ key: d.key, n });
+          if (n && !replaces.includes(d.key)) depends.push({ key: d.key, n });
         }
       }
     }
 
-    this.store.append("slot.versioned", { kind: "agent", session }, {
+    const main = this.store.append("slot.versioned", { kind: "agent", session }, {
       key,
       value: input.value,
       rationale: input.rationale,
@@ -136,6 +169,7 @@ export class Board {
       ...(input.retired ? { retired: true } : {}),
       ...(input.userQuote ? { userQuote: input.userQuote } : {}),
     });
+    const merged = replaces.length ? this.merge(session, state, key, (slot?.versions.length ?? 0) + 1, replaces, main.id, input.userQuote) : null;
 
     const after = this.load().state;
     this.writeStatus(after);
@@ -143,6 +177,7 @@ export class Board {
     const v = now.current!;
     const out: string[] = [`Recorded ${key} v${v.n} (${v.source === "user" ? "user decision" : "proposal, awaiting user confirmation or default acceptance"}).`];
     if (cur) out.push(`Replaces v${cur.n} "${cur.value}".`);
+    if (merged) out.push(...merged);
 
     const dependents = dependentsOf(after, key);
     if (cur && dependents.length) {
@@ -305,6 +340,42 @@ export class Board {
     }
     this.writeStatus();
     return `Answer recorded. It covers ${q.about.join(", ")}; update each with record (with userQuote) to match the answer.`;
+  }
+
+  /**
+   * Retire the replaced slots and re-point decisions that depended on them to the merged key.
+   * Re-pointed versions inherit the old version's source and confirmation, so a merge never demotes a user decision.
+   */
+  private merge(session: string, state: State, key: SlotKey, n: number, replaces: SlotKey[], cause: string, userQuote?: string): string[] {
+    const actor: Actor = { kind: "agent", session };
+    for (const r of replaces) {
+      const rv = state.slots.get(r)!.current!;
+      this.store.append("slot.versioned", actor, {
+        key: r, value: rv.value, rationale: `Merged into ${key}.`, depends: [], topics: [], retired: true, replacedBy: key,
+        ...(userQuote ? { userQuote } : {}),
+      }, cause);
+    }
+    const gone = new Set<SlotKey>(replaces);
+    const repointed: string[] = [];
+    for (const s of state.slots.values()) {
+      const v = s.current;
+      if (!v || v.retired || s.key === key || gone.has(s.key) || !v.depends.some((d) => gone.has(d.key))) continue;
+      const depends: Dep[] = [];
+      for (const d of v.depends) {
+        const next = gone.has(d.key) ? { key, n } : d;
+        if (!depends.some((x) => x.key === next.key)) depends.push(next);
+      }
+      this.store.append("slot.versioned", actor, {
+        key: s.key, value: v.value, rationale: v.rationale, depends, topics: [], ...(v.scope ? { scope: v.scope } : {}), inherit: v.n,
+      }, cause);
+      repointed.push(s.key);
+    }
+    const tasks = [...state.tasks.values()].filter((t) => t.status !== "dropped" && t.status !== "verified" && t.basedOn.some((b) => gone.has(b.key)));
+    return [
+      `Retired ${replaces.join(", ")} as merged into ${key}.`,
+      ...(repointed.length ? [`Re-pointed ${repointed.length} decision(s) that depended on them to ${key}: ${repointed.join(", ")}. Their values are unchanged; if the merged value changes what they rest on, review them.`] : []),
+      ...(tasks.length ? [`Tasks based on the retired slots now need review: ${tasks.map((t) => t.slug).join(", ")}.`] : []),
+    ];
   }
 
   private relock(state: State, deps: Dep[]): Dep[] {

@@ -284,3 +284,65 @@ describe("export", () => {
     expect(x.asOf.event).toBe(board.store.readEvents().at(-1)!.id);
   });
 });
+
+describe("finding and merging keys", () => {
+  it("holds back a new key that looks like an existing one, and new: true goes through", () => {
+    seedWindowsWorld();
+    let msg = "";
+    try { board.record("s1", { key: "arch/sync-provider", value: "OneDrive", rationale: "Ships with Windows" }); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toContain("Not recorded yet");
+    expect(msg).toContain("arch/sync-backend");
+    expect(board.load().state.slots.has("arch/sync-provider")).toBe(false);
+    expect(board.record("s1", { key: "arch/sync-provider", value: "OneDrive", rationale: "Ships with Windows", new: true })).toContain("Recorded arch/sync-provider v1");
+  });
+
+  it("does not hold back distinct decisions or new versions of an existing key", () => {
+    seedWindowsWorld();
+    expect(board.record("s1", { key: "product/autostart", value: "Off by default", rationale: "Conservative" })).toContain("Recorded");
+    expect(board.record("s1", { key: "platform/target-os", value: "Windows 11", rationale: "Drop 10" })).toContain("v2");
+  });
+
+  it("replaces retires the old key and re-points its dependents without demoting them", () => {
+    seedWindowsWorld();
+    board.record("s1", { key: "product/offline-mode", value: "Works offline, syncs later", rationale: "Sync is optional", depends: ["arch/sync-backend"], userQuote: "offline first" });
+    board.task("s1", { slug: "onedrive-client", title: "OneDrive client", basedOn: ["arch/sync-backend"] });
+    // arch/sync-backend is the user's arch decision, so merging it away needs their words
+    expect(() => board.record("s1", { key: "arch/cloud-sync", value: "OneDrive", rationale: "Same decision", replaces: ["arch/sync-backend"] })).toThrow(FixableError);
+    const msg = board.record("s1", { key: "arch/cloud-sync", value: "OneDrive", rationale: "Same decision", depends: ["assum/user-os"], replaces: ["arch/sync-backend"], userQuote: "merge them" });
+    expect(msg).toContain("Retired arch/sync-backend as merged into arch/cloud-sync");
+    expect(msg).toContain("product/offline-mode");
+    expect(msg).toContain("onedrive-client");
+
+    const { state } = board.load();
+    const old = state.slots.get("arch/sync-backend")!.current!;
+    expect(old.retired).toBe(true);
+    expect(old.replacedBy).toBe("arch/cloud-sync");
+    const offline = state.slots.get("product/offline-mode")!;
+    expect(offline.current!.depends).toEqual([{ key: "arch/cloud-sync", n: 1 }]);
+    expect(offline.stale).toEqual([]);
+    expect(offline.current!.status).toBe("decided");
+    expect(offline.current!.value).toBe("Works offline, syncs later");
+  });
+
+  it("a re-pointed proposal keeps counting sessions from when it was first proposed", () => {
+    start("s1");
+    board.record("s1", { key: "arch/cache", value: "In-memory LRU", rationale: "Simple" });
+    board.record("s1", { key: "product/fast-start", value: "Start under 1s", rationale: "Cache helps", depends: ["arch/cache"] });
+    for (const s of ["s2", "s3"]) start(s);
+    board.record("s3", { key: "arch/memory-cache", value: "In-memory LRU", rationale: "Same", replaces: ["arch/cache"] });
+    start("s4");
+    expect(board.load().state.slots.get("product/fast-start")!.current!.status).toBe("accepted_by_default");
+  });
+
+  it("brief({ query }) finds live and retired slots; brief lists likely duplicates", () => {
+    seedWindowsWorld();
+    board.record("s1", { key: "arch/sync-provider", value: "OneDrive sync", rationale: "x", new: true });
+    expect(board.brief()).toContain("## Possible duplicates");
+    board.record("s1", { key: "arch/sync-provider", value: "OneDrive sync", rationale: "x", replaces: ["arch/sync-backend"], userQuote: "merge" });
+    const found = board.brief("onedrive");
+    expect(found).toContain("arch/sync-provider v");
+    expect(found).toContain("arch/sync-backend v2 \"OneDrive\" (retired, merged into arch/sync-provider)");
+    expect(board.brief()).not.toContain("## Possible duplicates");
+    expect(board.brief("nothing like this")).toContain("Nothing matches");
+  });
+});

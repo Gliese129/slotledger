@@ -4,6 +4,7 @@ import type { AnyEvent, Category, SlotKey } from "./types.js";
 import type { Config, Strictness } from "./types.js";
 import { CATEGORIES, GUARDED } from "./types.js";
 import { settingsBrief } from "./settings.js";
+import { duplicatePairs, search } from "./similar.js";
 
 export const STATUS_LABEL: Record<VersionState["status"], string> = {
   decided: "decided",
@@ -17,6 +18,8 @@ export const CAT_LABEL: Record<Category, string> = {
 };
 
 const MAX_LIST = 3;
+/** Above this many live decisions, brief lists assumptions and dependencies by key only */
+const BRIEF_FULL = 40;
 
 export function live(state: State): SlotState[] {
   const order = (s: SlotState) => CATEGORIES.indexOf(s.category);
@@ -45,14 +48,25 @@ export function renderBrief(state: State, config: Config, errors = 0): string {
   const slots = live(state);
   if (slots.length) {
     lines.push("", "## Live decisions");
-    for (const s of slots) {
-      const v = s.current!;
-      const deps = v.depends.length ? ` · depends on ${v.depends.map((d) => `${d.key}@${d.n}`).join(", ")}` : "";
-      const scope = v.scope?.length ? ` · scope ${v.scope.join(", ")}` : "";
-      lines.push(`- ${s.key} v${v.n} "${v.value}" (${STATUS_LABEL[v.status]})${deps}${scope}${staleNote(s)}`);
+    // with many decisions, keep the lines that matter in full and only name the rest, so brief stays short
+    const compact = slots.length > BRIEF_FULL;
+    const full = (s: SlotState) => !compact || !["assum", "dep"].includes(s.category) || s.stale.length > 0 || s.current!.status === "proposed";
+    for (const s of slots.filter(full)) lines.push(`- ${briefLine(s)}`);
+    if (compact) {
+      for (const c of ["assum", "dep"] as Category[]) {
+        const rest = slots.filter((s) => s.category === c && !full(s));
+        if (rest.length) lines.push(`- ${c} (${rest.length} more, by key): ${rest.map((s) => s.key).join(", ")}`);
+      }
     }
   } else {
     lines.push("", "No decisions recorded yet.");
+  }
+
+  const dups = duplicatePairs(state, MAX_LIST);
+  if (dups.length) {
+    lines.push("", "## Possible duplicates");
+    for (const d of dups) lines.push(`- ${d.a.key} "${d.a.current!.value}" ≈ ${d.b.key} "${d.b.current!.value}"`);
+    lines.push("If two are the same decision, merge them: record the one to keep with replaces: [the other]. If they're different, leave them.");
   }
 
   const qs = openQuestions(state);
@@ -73,8 +87,38 @@ export function renderBrief(state: State, config: Config, errors = 0): string {
   lines.push(
     "",
     "Use record when you make or change a decision; task when you start or advance work; verify to run a command before claiming something is done; respond when the user replies to numbers in a report.",
+    "Before adding a new key, look for an existing one with brief({ query }); reuse or merge instead of adding near-duplicates.",
     "Keep plans, todos, and decisions here; don't write separate PLAN/TODO/handoff documents.",
   );
+  return lines.join("\n");
+}
+
+function briefLine(s: SlotState): string {
+  const v = s.current!;
+  const deps = v.depends.length ? ` · depends on ${v.depends.map((d) => `${d.key}@${d.n}`).join(", ")}` : "";
+  const scope = v.scope?.length ? ` · scope ${v.scope.join(", ")}` : "";
+  return `${s.key} v${v.n} "${v.value}" (${STATUS_LABEL[v.status]})${deps}${scope}${staleNote(s)}`;
+}
+
+/** brief({ query }): the slots and tasks that best match, including retired slots so an old key can be reused */
+export function renderSearch(state: State, query: string): string {
+  const { slots, tasks } = search(state, query);
+  const lines: string[] = [`# slotboard matches for "${query}"`];
+  if (slots.length) {
+    lines.push("", "## Decisions");
+    for (const s of slots) {
+      const v = s.current ?? s.versions[s.versions.length - 1];
+      const gone = !s.current ? " (rejected)" : v.retired ? ` (retired${v.replacedBy ? `, merged into ${v.replacedBy}` : ""})` : "";
+      lines.push(gone ? `- ${s.key} v${v.n} "${v.value}"${gone}` : `- ${briefLine(s)}`);
+      if (!gone) lines.push(`  why: ${v.rationale}`);
+    }
+  }
+  if (tasks.length) {
+    lines.push("", "## Tasks");
+    for (const t of tasks) lines.push(`- ${t.slug} [${t.status}] ${t.title}`);
+  }
+  if (!slots.length && !tasks.length) lines.push("", "Nothing matches. Try other words, or brief() with no query for everything.");
+  else lines.push("", "Reuse a matching key to update it (a new version); merge duplicates with record({ ..., replaces: [old keys] }).");
   return lines.join("\n");
 }
 

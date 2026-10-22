@@ -42,6 +42,8 @@ Implementation details like variable names, function splits, or typo fixes don't
 - **Fill in depends.** Depend on whichever assumption or platform the decision rests on. The record result suggests candidates.
 - **If the user said it, include userQuote.** Only then does it count as the user's decision.
 - **Changing a product/arch decision the user made is refused.** Ask the user first; once they agree, write it with userQuote.
+- **Reuse keys.** Before adding a key, search with `brief({ query: "..." })`. Updating an existing key makes a new version. A new key that looks like an existing one is held back once with the similar keys listed: reuse one, merge with `replaces: [old keys]`, or pass `new: true` if it really is separate.
+- **Merge duplicates** when brief lists them: record the one to keep with `replaces`. The old keys are retired and the decisions that depended on them are re-pointed, keeping their status.
 
 ## When a premise changes
 
