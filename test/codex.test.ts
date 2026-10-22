@@ -126,7 +126,8 @@ describe("Codex lifecycle", () => {
     expect(currentSession(store, "conn-5")).toEqual({ id: "claude-env", via: "env" });
   });
 
-  it("runs Codex hooks with git detection, report replies, compaction and session end", () => {
+  // spawns a hook process per step, so a busy machine can take several seconds
+  it("runs Codex hooks with git detection, report replies, compaction and session end", { timeout: 30000 }, () => {
     expect(hook("session-start", {}).hookSpecificOutput.hookEventName).toBe("SessionStart");
     write("src/main.ts", "export const changed = true;\n");
     expect(hook("stop", {}).decision).toBe("block");

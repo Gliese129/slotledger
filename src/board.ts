@@ -7,7 +7,7 @@ import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, orphans, type State } from "./fold.js";
 import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
-import { buildNudge, buildReport, formatNudge, removedPremiseText, renderBrief, renderSearch, renderStatusMd, renderTask, reviewHint, type Report } from "./report.js";
+import { buildNudge, buildReport, formatNudge, looksLikeReply, removedPremiseText, renderBrief, renderSearch, renderStatusMd, renderTask, reviewHint, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
 import { similarSlots } from "./similar.js";
 import { Store, ulid } from "./store.js";
@@ -903,25 +903,50 @@ export class Board {
   /** End of each turn: nudge the AI once, then show the user a report only when there is something new */
   stop(session: string, stopHookActive: boolean): { block?: string; message?: string } {
     this.ensureSession(session, { name: "claude-code", version: "" });
+    this.touch(session);
     const analysis = this.analyzeSession(session);
     const { events, state } = this.load();
     this.writeStatus(state);
 
+    // Changed files can't be told apart from another session's in the same working tree: when one was active, they go to the user, not the AI
+    const since = state.sessions.get(session)?.start.at;
+    const others = since ? this.overlapping(session, since, events) : [];
     const nudgedFile = `nudged-${session}.json`;
     const nudged = new Set(this.store.readRun<string[]>(nudgedFile) ?? []);
     const strictness = strictnessOf(this.store.readConfig());
-    const fresh = buildNudge(state, analysis, strictness).filter((p) => !nudged.has(p.key));
+    const fresh = buildNudge(state, others.length ? null : analysis, strictness).filter((p) => !nudged.has(p.key));
     // loose never interrupts the AI; the same findings still reach the user as notes in the report
     if (!stopHookActive && fresh.length && strictness !== "loose") {
       this.store.writeRun(nudgedFile, [...nudged, ...fresh.map((p) => p.key)]);
       return { block: formatNudge(fresh) };
     }
 
-    const report = buildReport(state, events, session, analysis);
+    const report = buildReport(state, events, session, analysis, others);
     const last = this.store.readRun<Report>(`report-${session}.json`);
     if (!report.text || report.signature === last?.signature) return {};
     this.store.writeRun(`report-${session}.json`, report);
     return { message: report.text };
+  }
+
+  /** Note that this session just did something, so overlapping sessions can be told apart */
+  private touch(session: string): void {
+    this.store.writeRun(`active-${session}.json`, { at: new Date().toISOString() });
+  }
+
+  /** Other sessions active in this working tree since `since`: their hooks ran, or they recorded something */
+  private overlapping(session: string, since: string, events: AnyEvent[]): string[] {
+    const ids = new Set<string>();
+    for (const f of this.store.listRun()) {
+      const m = /^active-(.+)\.json$/.exec(f);
+      const at = m && m[1] !== session ? this.store.readRun<{ at: string }>(f)?.at : undefined;
+      if (at && at > since) ids.add(m![1]);
+    }
+    for (const ev of events) {
+      if (ev.at <= since) continue;
+      const sid = ev.actor.kind === "human" ? ev.actor.via : ev.actor.session;
+      if (sid && sid !== session) ids.add(sid);
+    }
+    return [...ids];
   }
 
   sessionEnd(session: string): void {
@@ -932,9 +957,10 @@ export class Board {
 
   /** When the user replies with report numbers, give the AI the items those numbers refer to */
   replyContext(session: string, prompt: string): string | null {
+    this.touch(session);
     const report = this.store.readRun<Report>(`report-${session}.json`);
     if (!report?.items.length) return null;
-    if (!/(withdraw|undo|confirm|撤回|确认)\s*\d|(^|[^\d])\d{1,2}\s*[A-Za-z]?($|[^\w])/i.test(prompt)) return null;
+    if (!looksLikeReply(prompt, report.items)) return null;
     const lines = report.items.map((i) =>
       i.kind === "question"
         ? `${i.no} = question (${i.options?.map((o) => `${o.id} ${o.label}`).join(" / ") ?? "free answer"}): ${i.text}`

@@ -149,7 +149,7 @@ To keep a team in the loop, ask the AI to put the project state in your shared d
 0.2, and it works on itself: this repo is developed with slotledger tracking it. Known gaps:
 
 - Automatic lifecycle checks require enabled, trusted hooks. Without them, the agent must call `brief` and `checkpoint`.
-- With two sessions in the same working tree, each one is blamed for the other's changes. Telling human edits from AI edits isn't implemented yet.
+- Changed files can't be told apart between sessions in the same working tree. When another session was active during this one, file findings go to your report instead of the AI, marked as possibly the other session's. Telling human edits from AI edits isn't implemented.
 - A dependency covers a whole decision. When dependents rest on different parts of one, the AI splits it with `split`; until then, `unaffected` handles a change in one call.
 - `.project/config.json` records the oldest slotledger that reads the log correctly (`requires`), and older versions warn in the brief. 0.1.x predates this check, so everyone on a repository should move to 0.2 together.
 
