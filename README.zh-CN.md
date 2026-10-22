@@ -31,7 +31,7 @@ If you disagree, reply "withdraw 2".
 Everything else is done: config-dir-macos (verified on darwin 25.1.0 arm64, node v22.23.0)
 ```
 
-直接回复编号即可，例如 `1A` 或 `撤回 2`，AI 会连同你的原话一起记录。在你回答之前，AI 不应改动与待确认事项相关的工作。
+直接回复编号即可，例如 `1A` 或 `撤回 2`，AI 会查出编号对应的内容，并连同你的原话一起记录。在你回答之前，AI 不应改动与待确认事项相关的工作。
 
 在 Claude Code 中，汇报由 hook 直接显示给你，不经过 AI 转述。Slot Ledger 自身的提示文字是英文；决定、理由、任务等内容按你选择的语言记录。
 
@@ -59,9 +59,9 @@ npx slotledger init --language 中文 --strictness balanced
 npx slotledger init --client codex --language 中文 --strictness balanced
 ```
 
-对于 Codex，`init` 会把 MCP 配置合并进 `.codex/config.toml`，把四个生命周期 hooks 写入 `.codex/hooks.json`，并把 skill 安装到 `.agents/skills/slotledger/SKILL.md`。已有的服务配置和其他 hooks 会保留，但 TOML 的排版和注释会被重新生成。之后在 Codex 中信任该项目、审阅并信任 hooks，再新开会话。参见官方的 [MCP 配置](https://developers.openai.com/codex/mcp)和 [hooks 说明](https://learn.chatgpt.com/docs/hooks)。
+对于 Codex，`init` 会把 MCP 配置合并进 `.codex/config.toml`，把生命周期 hooks 写入 `.codex/hooks.json`，并把 skill 安装到 `.agents/skills/slotledger/SKILL.md`。已有的服务配置和其他 hooks 会保留，但 TOML 的排版和注释会被重新生成。之后在 Codex 中信任该项目、审阅并信任 hooks，再新开会话。参见官方的 [MCP 配置](https://developers.openai.com/codex/mcp)和 [hooks 说明](https://learn.chatgpt.com/docs/hooks)。
 
-Codex 的 MCP 请求通过 `threadId` 与 hooks 共用同一个会话，重连后仍能沿用。未启用 hooks 时，AI 需要在编辑前调用 `brief`、在每个回合结束前调用 `checkpoint`；收到漏记提醒并处理后，再调用 `checkpoint({ continued: true })`，并把汇报原样展示给你。`brief({ prompt: "1A" })` 可以解析回复中的编号。这条降级路径依赖 AI 主动调用工具；拿不到线程 ID 时，会退回到按 MCP 连接区分会话。
+Codex 的 MCP 请求通过 `threadId` 与 hooks 共用同一个会话，重连后仍能沿用。未启用 hooks 时，AI 需要在编辑前调用 `brief`、在每个回合结束前调用 `checkpoint`；收到漏记提醒并处理后，再调用 `checkpoint({ continued: true })`，并把汇报原样展示给你。这条降级路径依赖 AI 主动调用工具；拿不到线程 ID 时，会退回到按 MCP 连接区分会话。
 
 ### 版本与升级
 
@@ -115,7 +115,6 @@ Codex 的 MCP 请求通过 `threadId` 与 hooks 共用同一个会话，重连�
 | Hook | 作用 |
 |---|---|
 | SessionStart | 记录会话开始，保存工作区快照，并向 AI 提供 brief。 |
-| UserPromptSubmit | 你的消息看起来是在回复汇报编号时，告诉 AI 这些编号对应的内容。 |
 | Stop | 比对工作区改动，先提醒 AI 一次遗漏的记录，再向你显示汇报。 |
 | SessionEnd | 记录会话结束，并刷新 `STATUS.md`。 |
 

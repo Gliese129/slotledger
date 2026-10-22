@@ -7,7 +7,7 @@ import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, orphans, type State } from "./fold.js";
 import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
-import { buildNudge, buildReport, formatNudge, looksLikeReply, removedPremiseText, renderBrief, renderSearch, renderStatusMd, renderTask, reviewHint, type Report } from "./report.js";
+import { buildNudge, buildReport, formatNudge, removedPremiseText, renderBrief, renderSearch, renderStatusMd, renderTask, reviewHint, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
 import { similarSlots } from "./similar.js";
 import { Store, ulid } from "./store.js";
@@ -956,18 +956,22 @@ export class Board {
   }
 
   /** When the user replies with report numbers, give the AI the items those numbers refer to */
-  replyContext(session: string, prompt: string): string | null {
+  /** Note that a session is active, from hooks that don't otherwise act */
+  activity(session: string): void {
     this.touch(session);
+  }
+
+  /** What the numbers in this session's latest report mean, for resolving a reply such as 1A or withdraw 2 */
+  reportItems(session: string): string | null {
     const report = this.store.readRun<Report>(`report-${session}.json`);
     if (!report?.items.length) return null;
-    if (!looksLikeReply(prompt, report.items)) return null;
     const lines = report.items.map((i) =>
       i.kind === "question"
         ? `${i.no} = question (${i.options?.map((o) => `${o.id} ${o.label}`).join(" / ") ?? "free answer"}): ${i.text}`
         : `${i.no} = decision made on the user's behalf, ${i.key} v${i.n}: ${i.text}`,
     );
     return [
-      "The user may be replying to the last slotledger report. The numbers mean:",
+      "The numbers in this session's last slotledger report mean:",
       ...lines,
       "Answer a question with respond({ item, choice or text, userQuote }); withdraw a decision with respond({ item, withdraw: true, text?: replacement, userQuote }). userQuote is the user's exact words.",
     ].join("\n");

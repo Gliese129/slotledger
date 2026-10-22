@@ -316,21 +316,6 @@ export interface ReportItem {
   text: string;
 }
 
-/** Whether a message reads like an answer to a report's numbers, not just a message that has numbers in it (versions, sizes, counts) */
-export function looksLikeReply(prompt: string, items: ReportItem[]): boolean {
-  const text = prompt.trim();
-  const has = (n: number) => n >= 1 && n <= items.length;
-  // "withdraw 2", "撤回 2", "confirm 1"
-  for (const m of text.matchAll(/(withdraw|undo|confirm|keep|撤回|撤销|确认|保留)\s*#?(\d{1,2})(?![\d.])/gi)) if (has(Number(m[2]))) return true;
-  // "1A", "2 b": only when that numbered item is a question with that option
-  for (const m of text.matchAll(/(?<![\w.])(\d{1,2})\s*([A-Za-z])(?![\w.])/g)) {
-    if (items[Number(m[1]) - 1]?.options?.some((o) => o.id.toLowerCase() === m[2].toLowerCase())) return true;
-  }
-  // a short message built around an item number: "1", "2 改成默认关闭"
-  if (text.length <= 30) for (const m of text.matchAll(/(?<![\w.])(\d{1,2})(?![\w.%])/g)) if (has(Number(m[1]))) return true;
-  return false;
-}
-
 export interface Report {
   session: string;
   at: string;

@@ -21,7 +21,7 @@ Follow the language and strictness that brief shows for the project.
 
 For Codex, install with `slotledger init --client codex` (or `--client both` for Codex and Claude Code). This writes project-local MCP and hooks config and installs this skill under `.agents/skills/slotledger/`. Codex must trust the project and its hook definitions before the hooks run.
 
-Call `brief` before editing when hooks are unavailable; this establishes the session's git baseline. When the user replies with a report number, pass their reply as `brief({ prompt: "1A" })` to read the numbered items before calling `respond`.
+Call `brief` before editing when hooks are unavailable; this establishes the session's git baseline.
 
 ## When to record
 
@@ -86,7 +86,7 @@ Only a new value (or retiring, deleting, rejecting) flags anything, and only one
 
 - If the user is around, ask them directly; record the answer with `respond`, passing the question ID from brief as question.
 - If the user isn't around, use `ask`; the question appears in the end-of-turn report.
-- When the user replies to report numbers, e.g. "1A" or "withdraw 2", use `respond`. userQuote is the user's exact words.
+- When the user replies to report numbers, e.g. "1A" or "withdraw 2", first call `brief({ prompt: "<their reply>" })` to see what the numbers mean, then record it with `respond`. userQuote is the user's exact words.
 
 ## Shared team docs
 

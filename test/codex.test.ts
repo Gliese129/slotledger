@@ -97,6 +97,21 @@ describe("Codex setup", () => {
     expect(existsSync(join(root, ".codex"))).toBe(false);
   });
 
+  it("rerunning init removes the prompt hook older versions installed and keeps everyone else's", () => {
+    const old = (cmd: string) => ({ hooks: [{ type: "command", command: cmd }] });
+    write(".claude/settings.json", JSON.stringify({ hooks: {
+      UserPromptSubmit: [old("node /x/slotledger/dist/cli.js hook prompt --client claude-code"), old("echo mine")],
+    } }));
+    write(".codex/hooks.json", JSON.stringify({ hooks: { UserPromptSubmit: [old("npx slotledger hook prompt --client codex")] } }));
+    run("init", "--client", "both");
+    const claude = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8")).hooks;
+    expect(claude.UserPromptSubmit).toEqual([old("echo mine")]);
+    expect(Object.keys(claude).sort()).toEqual(["SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
+    const codex = JSON.parse(readFileSync(join(root, ".codex/hooks.json"), "utf8")).hooks;
+    expect(codex.UserPromptSubmit).toBeUndefined();
+    expect(Object.keys(codex).sort()).toEqual(["SessionEnd", "SessionStart", "Stop"]);
+  });
+
   it("rejects invalid TOML and client names before installing", () => {
     write(".codex/config.toml", "not valid toml");
     for (const client of ["codex", "typo"]) {
@@ -127,7 +142,7 @@ describe("Codex lifecycle", () => {
   });
 
   // spawns a hook process per step, so a busy machine can take several seconds
-  it("runs Codex hooks with git detection, report replies, compaction and session end", { timeout: 30000 }, () => {
+  it("runs Codex hooks with git detection, reports, compaction and session end", { timeout: 30000 }, () => {
     expect(hook("session-start", {}).hookSpecificOutput.hookEventName).toBe("SessionStart");
     write("src/main.ts", "export const changed = true;\n");
     expect(hook("stop", {}).decision).toBe("block");
@@ -135,7 +150,8 @@ describe("Codex lifecycle", () => {
     const board = new Board(new Store(root));
     board.record("codex-1", { key: "approach/test", value: "A", rationale: "test" });
     hook("stop", { stop_hook_active: true });
-    expect(hook("prompt", { prompt: "withdraw 1" }).hookSpecificOutput.additionalContext).toContain("approach/test");
+    // the prompt hook from older installs only notes activity now; replies are looked up with brief({ prompt })
+    expect(hook("prompt", { prompt: "withdraw 1" })).toBeNull();
     hook("session-start", { source: "compact" });
     expect(board.store.readEvents().filter((e) => e.type === "session.started")).toHaveLength(1);
     expect(board.load().state.sessions.get("codex-1")!.client.name).toBe("codex");

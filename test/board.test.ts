@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Board, FixableError } from "../src/board.js";
-import { looksLikeReply, type ReportItem } from "../src/report.js";
 import { Store, shortHash } from "../src/store.js";
 import { startWeb } from "../src/web.js";
 import { validateSettings, writeSettings } from "../src/settings.js";
@@ -152,7 +151,7 @@ describe("change analysis", () => {
     start("s1");
     await new Promise((r) => setTimeout(r, 5));
     // another session finishes a turn in this working tree and leaves its edits
-    board.replyContext("other-session", "start");
+    board.activity("other-session");
     write("src/sync/icloud.ts", "export const backend = 'icloud'\n");
     board.stop("other-session", false);
     // nothing to nudge the AI about, so the report goes straight to the user
@@ -164,7 +163,7 @@ describe("change analysis", () => {
   });
 
   it("a session that was only active before this one started doesn't count", async () => {
-    board.replyContext("earlier", "hi");
+    board.activity("earlier");
     board.stop("earlier", true);
     await new Promise((r) => setTimeout(r, 5));
     start("s1");
@@ -936,24 +935,3 @@ describe("task lifecycle", () => {
   });
 });
 
-describe("report replies", () => {
-  const items: ReportItem[] = [
-    { no: 1, kind: "question", qid: "q1", options: [{ id: "A", label: "Keep" }, { id: "B", label: "Change" }], text: "?" },
-    { no: 2, kind: "decision", key: "goal/x", n: 1, text: "x" },
-    { no: 3, kind: "decision", key: "goal/y", n: 1, text: "y" },
-  ];
-  it("recognizes answers to the numbers", () => {
-    // short messages built around an item number count, even when they could mean something else ("2的话走b吧")
-    for (const m of ["2的话走b吧", "1A", "1 b", "withdraw 2", "撤回 3", "1A, withdraw 2", "2", "3 改成默认关闭", "确认 2"]) expect(looksLikeReply(m, items), m).toBe(true);
-  });
-  it("ignores messages that only happen to contain numbers", () => {
-    for (const m of [
-      "Commit and push; I'll npm publish 0.2.0 myself",
-      "bump it to 0.2.1 after that",
-      "Still open这两个，和我对齐下？",
-      "npm notice unpacked size: 250.4 kB, total files: 21",
-      "It ran 11 agents on the A2 matrix with 4 seeds, each 48-72 hours, which is far more than the review needed",
-      "2C", "withdraw 7", "9",
-    ]) expect(looksLikeReply(m, items), m).toBe(false);
-  });
-});

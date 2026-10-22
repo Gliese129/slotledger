@@ -31,7 +31,7 @@ If you disagree, reply "withdraw 2".
 Everything else is done: config-dir-macos (verified on darwin 25.1.0 arm64, node v22.23.0)
 ```
 
-Reply with the numbers, such as `1A` or `withdraw 2`, and the AI records your answer with your exact words. Until you answer, the AI shouldn't change work related to the open items.
+Reply with the numbers, such as `1A` or `withdraw 2`; the AI looks up what they refer to and records your answer with your exact words. Until you answer, the AI shouldn't change work related to the open items.
 
 In Claude Code, the hook shows the report to you directly, without the AI rewording it. Slot Ledger's own messages are in English; decisions, rationales, and tasks are recorded in the language you choose.
 
@@ -59,9 +59,9 @@ If the project has `.codex/` or `AGENTS.md`, or `codex` is on your PATH, `init` 
 npx slotledger init --client codex --language English --strictness balanced
 ```
 
-For Codex, `init` merges the MCP server into `.codex/config.toml`, writes the four lifecycle hooks to `.codex/hooks.json`, and installs the skill to `.agents/skills/slotledger/SKILL.md`. Existing server settings and other hooks are kept, but TOML formatting and comments are regenerated. Then trust the project in Codex, review and trust the hooks, and start a new session. See the official [MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks) documentation.
+For Codex, `init` merges the MCP server into `.codex/config.toml`, writes the lifecycle hooks to `.codex/hooks.json`, and installs the skill to `.agents/skills/slotledger/SKILL.md`. Existing server settings and other hooks are kept, but TOML formatting and comments are regenerated. Then trust the project in Codex, review and trust the hooks, and start a new session. See the official [MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks) documentation.
 
-Codex MCP requests share a session with the hooks through their `threadId`, which carries over across reconnections. Without hooks, the AI needs to call `brief` before editing and `checkpoint` before finishing each turn; after handling a reminder, it calls `checkpoint({ continued: true })` and shows you the report verbatim. `brief({ prompt: "1A" })` resolves the numbers in a reply. This fallback depends on the AI calling the tools; without a thread ID, sessions fall back to the MCP connection.
+Codex MCP requests share a session with the hooks through their `threadId`, which carries over across reconnections. Without hooks, the AI needs to call `brief` before editing and `checkpoint` before finishing each turn; after handling a reminder, it calls `checkpoint({ continued: true })` and shows you the report verbatim. This fallback depends on the AI calling the tools; without a thread ID, sessions fall back to the MCP connection.
 
 ### Versions and upgrades
 
@@ -115,7 +115,6 @@ The earlier prefixes `product/`, `arch/`, and `platform/` still work as aliases 
 | Hook | What it does |
 |---|---|
 | SessionStart | Records the start of the session, snapshots the working tree, and gives the AI the brief. |
-| UserPromptSubmit | When your message looks like a reply to report numbers, tells the AI what those numbers refer to. |
 | Stop | Compares the working tree, reminds the AI once about missed records, then shows you the report. |
 | SessionEnd | Records the end of the session and refreshes `STATUS.md`. |
 

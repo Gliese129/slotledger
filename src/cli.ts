@@ -45,11 +45,10 @@ async function hook(event: string, client: string): Promise<void> {
         out({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: board.brief() } });
         break;
       }
-      case "prompt": {
-        const ctx = board.replyContext(session, input.prompt ?? "");
-        if (ctx) out({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: ctx } });
+      // installed by versions before 0.2.1; kept so their hooks don't error until init is rerun
+      case "prompt":
+        board.activity(session);
         break;
-      }
       case "stop": {
         board.ensureSession(session, { name: client, version: "" });
         const r = board.stop(session, !!input.stop_hook_active);
@@ -154,12 +153,16 @@ function init(target: string, settings: SettingsInput, chosen: string | undefine
     return { ...c, mcpServers: { ...servers, slotledger: { command, args, env: { SLOTLEDGER_ROOT: root, SLOTLEDGER_CLIENT: "claude-code" } } } };
   });
 
-  const hooks: Record<string, string> = { SessionStart: "session-start", UserPromptSubmit: "prompt", Stop: "stop", SessionEnd: "session-end" };
+  const hooks: Record<string, string> = { SessionStart: "session-start", Stop: "stop", SessionEnd: "session-end" };
+  // Hooks earlier versions installed and this one doesn't: rerunning init removes ours
+  const retired = ["UserPromptSubmit"];
   if (client !== "codex") mergeJson(join(root, ".claude", "settings.json"), (c) => {
     const h = { ...(c.hooks ?? {}) };
-    for (const [ev, sub] of Object.entries(hooks)) {
+    for (const ev of [...Object.keys(hooks), ...retired]) {
       const kept = (h[ev] ?? []).filter((g: any) => !ours(JSON.stringify(g)));
-      h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(sub, "claude-code"), timeout: 30 }] }];
+      if (hooks[ev]) h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(hooks[ev], "claude-code"), timeout: 30 }] }];
+      else if (kept.length) h[ev] = kept;
+      else delete h[ev];
     }
     const allow = new Set([...(c.permissions?.allow ?? []).filter((p: string) => p !== "mcp__slotboard__brief"), "mcp__slotledger__brief"]);
     const enabled = new Set([...(c.enabledMcpjsonServers ?? []).filter((s: string) => s !== "slotboard"), "slotledger"]);
@@ -171,12 +174,14 @@ function init(target: string, settings: SettingsInput, chosen: string | undefine
     installCodex(root, codex);
     mergeJson(join(root, ".codex", "hooks.json"), (c) => {
       const h = { ...(c.hooks ?? {}) };
-      for (const [ev, sub] of Object.entries(hooks)) {
+      for (const ev of [...Object.keys(hooks), ...retired]) {
         const kept = (h[ev] ?? []).map((group: any) => ({
           ...group,
           hooks: (group.hooks ?? []).filter((handler: any) => !(ours(handler.command ?? "") && /\bhook\b/.test(handler.command ?? ""))),
         })).filter((group: any) => group.hooks.length);
-        h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(sub, "codex"), timeout: ev === "SessionEnd" ? 3 : 30 }] }];
+        if (hooks[ev]) h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(hooks[ev], "codex"), timeout: ev === "SessionEnd" ? 3 : 30 }] }];
+        else if (kept.length) h[ev] = kept;
+        else delete h[ev];
       }
       return { ...c, hooks: h };
     });

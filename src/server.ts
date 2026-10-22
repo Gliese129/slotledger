@@ -162,10 +162,10 @@ export function createServer(root = resolveRoot()): McpServer {
     description: "Show live decisions, stale-premise flags, open questions, and tasks. Call before starting work or when unsure of the current state. With query, search decisions (including retired ones) and tasks, e.g. before adding a new key.",
     inputSchema: {
       query: z.string().optional().describe("Words to search slot keys, values, rationales and tasks for"),
-      prompt: z.string().optional().describe("The user's reply, e.g. 1A or withdraw 2, to resolve report numbers when prompt hooks are unavailable"),
+      prompt: z.string().optional().describe("The user's reply to the last report, e.g. 1A or withdraw 2: adds what its numbers mean"),
     },
     annotations: { readOnlyHint: true },
-  }, (args, extra) => run("brief", (s) => [board.brief(args.query), args.prompt ? board.replyContext(s, args.prompt) : null].filter(Boolean).join("\n\n"), extra._meta));
+  }, (args, extra) => run("brief", (s) => [board.brief(args.query), args.prompt ? board.reportItems(s) ?? "No report with numbered items in this session." : null].filter(Boolean).join("\n\n"), extra._meta));
 
   server.registerTool("checkpoint", {
     description: "Before finishing a turn without lifecycle hooks, check git changes and build the slotledger report. Address any nudge, then call again with continued: true and show the returned report to the user verbatim.",
