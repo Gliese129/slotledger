@@ -44,9 +44,16 @@ export interface EventDataMap {
     inherit?: number;
     /** What a human did in the web view: edit the value, or keep it as is after its premise changed */
     action?: "edit" | "keep";
+    /** On a retirement written by a split: the slots that replace this one */
+    splitInto?: SlotKey[];
+    /** On a slot created by a split: the version it was split from, and whether it keeps that version's owner */
+    splitFrom?: { key: SlotKey; n: number; keepOwner: boolean };
   };
   /** Removes a slot from everything the AI sees; its events stay for the audit trail */
   "slot.deleted": { key: SlotKey; reason?: string };
+  /** Version n still holds after a premise changed: its dependencies are re-locked to their current versions, with no new version.
+   *  repoint: only its dependencies moved to the pieces of a split, which isn't a review */
+  "slot.relocked": { key: SlotKey; n: number; depends: Dep[]; note: string; userQuote?: string; repoint?: boolean };
   "version.confirmed": { key: SlotKey; n: number; userQuote?: string };
   "version.rejected": { key: SlotKey; n: number; reason: string; replacement?: string };
   "task.created": { slug: string; title: string; basedOn: Dep[]; rootCause?: string };
@@ -56,6 +63,12 @@ export interface EventDataMap {
   /** basedOn: on a task that needed review, the pass re-locks it to the decisions as they are now */
   "task.verified": Evidence & { slug: string; basedOn?: Dep[] };
   "task.verify_failed": Evidence & { slug: string };
+  /** A new title or note on an existing task, without a status change */
+  "task.edited": { slug: string; title?: string; note?: string; rootCause?: string };
+  /** A one-off handoff note for whoever picks the task up, written against the current versions of basedOn; a new one replaces it */
+  "task.handoff": { slug: string; text: string; basedOn: Dep[] };
+  /** suspended: on hold, out of the task list and reminders; archived: out of brief, reports and the web overview, still in history and search */
+  "task.lifecycle": { slug: string; lifecycle: TaskLifecycle; note: string };
   "question.asked": { qid: string; about: SlotKey[]; text: string; options?: QOption[] };
   "question.answered": { qid: string; option?: string; text?: string; userQuote?: string };
 }
@@ -76,6 +89,10 @@ export type AnyEvent = { [T in EventType]: Event<T> }[EventType];
 /** One status per task. needs_review and verified are never set directly: slotledger derives needs_review when decisions a task rests on change, and only passing evidence sets verified */
 export const TASK_STATUSES = ["todo", "in_progress", "implemented", "needs_review", "verified", "dropped"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+/** Whether a task is in play, apart from how far it got */
+export const TASK_LIFECYCLES = ["live", "suspended", "archived"] as const;
+export type TaskLifecycle = (typeof TASK_LIFECYCLES)[number];
+
 /** What a task can be set to with the task tool */
 export const SETTABLE_STATUSES = ["todo", "in_progress", "implemented", "dropped"] as const;
 
@@ -142,6 +159,16 @@ export interface Config {
   language?: string;
   /** How much the AI is asked to record; unset until the user is asked (behaves as balanced) */
   strictness?: Strictness;
+  /** The oldest slotledger that reads every event in the log correctly; raised automatically when newer kinds of events are written */
+  requires?: string;
+}
+
+/** Compare dotted versions: negative when a is older than b */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((x) => parseInt(x, 10) || 0);
+  const pb = b.split(/[.-]/).map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  return 0;
 }
 
 /** How a human shaped a version, derived from events */

@@ -3,6 +3,12 @@ import { execFileSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Actor, AnyEvent, Config, EventDataMap, EventType } from "./types.js";
+import { compareVersions } from "./types.js";
+
+/** The first slotledger that reads these events; older ones skip them and misread the state */
+const READ_SINCE: Partial<Record<EventType, string>> = {
+  "slot.relocked": "0.2.0", "task.edited": "0.2.0", "task.handoff": "0.2.0", "task.lifecycle": "0.2.0",
+};
 
 // CC sets CLAUDE_PROJECT_DIR for both hooks and the MCP server; the server's cwd isn't guaranteed to be the project
 export function resolveRoot(cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()): string {
@@ -67,9 +73,21 @@ export class Store {
   append<T extends EventType>(type: T, actor: Actor, data: EventDataMap[T], cause?: string): AnyEvent {
     mkdirSync(this.dir, { recursive: true });
     const ev = { id: ulid(), type, at: new Date().toISOString(), actor, ...(cause ? { cause } : {}), data } as AnyEvent;
+    const d = data as EventDataMap["slot.versioned"];
+    const need = READ_SINCE[type] ?? (type === "slot.versioned" && (d.splitInto || d.splitFrom) ? "0.2.0" : undefined);
+    if (need) this.require(need);
     // one O_APPEND write per line, so concurrent appends from several processes never interleave
     appendFileSync(this.eventsPath, JSON.stringify(ev) + "\n");
     return ev;
+  }
+
+  /** Raise config.json's requires so older slotledger versions reading this log know to upgrade */
+  private require(version: string): void {
+    const p = join(this.dir, "config.json");
+    let raw: Record<string, unknown> = {};
+    try { if (existsSync(p)) raw = JSON.parse(readFileSync(p, "utf8")); } catch { return; /* leave a config we can't parse alone */ }
+    if (typeof raw.requires === "string" && compareVersions(raw.requires, version) >= 0) return;
+    writeFileSync(p, JSON.stringify({ ...raw, requires: version }, null, 2) + "\n");
   }
 
   readConfig(): Config {

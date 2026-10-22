@@ -1,8 +1,9 @@
 import type { Analysis } from "./analyze.js";
 import type { QuestionState, SlotState, State, TaskState, VersionState } from "./fold.js";
-import type { AnyEvent, Category, Evidence, SlotKey } from "./types.js";
+import type { AnyEvent, Category, Dep, Evidence, SlotKey } from "./types.js";
 import type { Config, Strictness } from "./types.js";
-import { CATEGORIES, GUARDED } from "./types.js";
+import { CATEGORIES, GUARDED, compareVersions } from "./types.js";
+import { PKG } from "./launch.js";
 import { settingsBrief } from "./settings.js";
 import { duplicatePairs, search } from "./similar.js";
 
@@ -41,9 +42,95 @@ export function verificationLine(t: TaskState): string {
   return "not verified";
 }
 
+/** What the task waits on: decisions it rests on whose own premises are being reviewed */
+export function waitingNote(t: TaskState): string {
+  return t.waitingOn.length ? ` (waiting on review of ${t.waitingOn.join(", ")})` : "";
+}
+
+/** One task in full, for task({ slug }): where it stands, what it rests on, and its handoff with whatever changed since it was written */
+export function renderTask(state: State, slug: string): string {
+  const t = state.tasks.get(slug)!;
+  const value = (k: SlotKey) => state.slots.get(k)?.current;
+  const lines = [`# ${t.slug} [${t.status}]${t.lifecycle !== "live" ? ` (${t.lifecycle})` : ""}`, "", t.title];
+  if (t.lifecycleNote && t.lifecycle !== "live") lines.push(`${t.lifecycle === "suspended" ? "Suspended" : "Archived"}: ${t.lifecycleNote.note}`);
+  if (t.note) lines.push(`Note: ${t.note}`);
+  if (t.rootCause) lines.push(`Root cause: ${t.rootCause}`);
+  const locked = (d: Dep) => {
+    const was = state.slots.get(d.key)?.versions[d.n - 1]?.value ?? "?";
+    const now = value(d.key);
+    return `${d.key}@${d.n} "${was}"` + (!now ? " (gone)" : now.n !== d.n ? ` (now v${now.n}${now.value !== was ? ` "${now.value}"` : ", same value"})` : "");
+  };
+  if (t.basedOn.length) lines.push(`Based on: ${t.basedOn.map(locked).join("; ")}`);
+  lines.push(`Verification: ${verificationLine(t)}`);
+  if (t.status === "needs_review") lines.push(reviewHint(t));
+  else if (t.waitingOn.length) lines.push(`Waiting on review of ${t.waitingOn.join(", ")}.`);
+  if (t.handoff) {
+    lines.push("", `## Handoff (written ${t.handoff.at.slice(0, 16).replace("T", " ")} UTC${t.handoff.session ? `, session ${t.handoff.session.slice(0, 8)}` : ""})`);
+    if (t.handoff.changed.length) {
+      lines.push("", "⚠ Changed since this was written; where the handoff relies on these, follow the current value:");
+      for (const d of t.handoff.changed) {
+        const s = state.slots.get(d.key);
+        const was = s?.versions[d.locked - 1]?.value ?? "?";
+        const now = s?.current;
+        lines.push(`- ${d.key}: was "${was}", now ${now ? (now.retired ? (now.splitInto ? `split into ${now.splitInto.join(", ")}` : "retired") : `"${now.value}"`) : "gone"}`);
+      }
+    }
+    lines.push("", t.handoff.text);
+  }
+  return lines.join("\n");
+}
+
+/** What rests on key, directly and further down, as an indented list */
+function impactTree(state: State, key: SlotKey, depth = 0, seen = new Set<string>()): string[] {
+  if (depth > 4) return [];
+  const pad = "  ".repeat(depth + 1);
+  const lines: string[] = [];
+  for (const s of live(state).filter((x) => x.current!.depends.some((d) => d.key === key))) {
+    if (seen.has(s.key)) continue;
+    seen.add(s.key);
+    const owner = GUARDED.includes(s.category) && (s.current!.source === "user" || s.current!.confirmed) ? " (the user's decision: ask them)" : "";
+    lines.push(`${pad}- ${s.key} "${s.current!.value}"${owner}`, ...impactTree(state, s.key, depth + 1, seen));
+  }
+  for (const t of state.tasks.values()) {
+    if (t.lifecycle === "archived" || t.progress === "dropped" || seen.has(t.slug) || !t.basedOn.some((d) => d.key === key)) continue;
+    seen.add(t.slug);
+    lines.push(`${pad}- task ${t.slug} "${t.title}"${t.lifecycle === "suspended" ? " (suspended)" : ""}`);
+  }
+  return lines;
+}
+
+/** A premise that's gone: the chain resting on it, and the choice to make for each thing directly on it */
+export function removedPremiseText(state: State, key: SlotKey): string {
+  const slot = state.slots.get(key);
+  const how = slot?.deleted ? "was deleted" : slot?.current?.retired ? "was retired" : "was withdrawn";
+  return [
+    `${key} ${how}. What rests on it, and further down:`,
+    ...impactTree(state, key),
+    `For each one directly under it, decide: if it stands without ${key}, drop the dependency with record({ key: "${key}", unaffected: [{ key, why }, ...] }); ` +
+      `if it only existed because of ${key}, retire or drop it with archive({ decisions, tasks, note }), then decide the same for what rests on it. ` +
+      `A task worth keeping for later can be suspended (task({ slug, lifecycle: "suspended", note })), but it still needs this decision when resumed.`,
+  ].join("\n");
+}
+
+/** Premises that are gone but still rested on */
+export function removedPremises(state: State): SlotKey[] {
+  const keys = new Set<SlotKey>();
+  for (const s of live(state)) for (const d of s.stale) if (d.gone) keys.add(d.key);
+  for (const t of state.tasks.values()) if (t.lifecycle === "live" && t.progress !== "dropped") for (const d of t.needsReview) if (d.gone) keys.add(d.key);
+  return [...keys];
+}
+
+/** Where a task's handoff stands, for task lists */
+function handoffNote(t: TaskState): string {
+  if (!t.handoff) return "";
+  return t.handoff.changed.length
+    ? ` · handoff (${t.handoff.changed.map((d) => d.key).join(", ")} changed since): task({ slug: "${t.slug}" })`
+    : ` · handoff: task({ slug: "${t.slug}" })`;
+}
+
 /** The three ways out of needs_review, for the AI */
 export function reviewHint(t: TaskState): string {
-  return `${t.slug} needs review: ${t.needsReview.map((d) => (d.locked === d.current ? `${d.key} has a changed premise` : `${d.key} v${d.locked}→${d.current ? `v${d.current}` : "gone"}`)).join(", ")}. ` +
+  return `${t.slug} needs review: ${t.needsReview.map((d) => `${d.key} v${d.locked}→${d.current ? `v${d.current}` : "gone"}`).join(", ")}. ` +
     `Pick one: re-verify it (a pass re-locks basedOn); confirm it still holds with task({ slug: "${t.slug}", basedOn: [${t.basedOn.map((d) => `"${d.key}"`).join(", ")}], note: "<why>" }); or drop it with status dropped.`;
 }
 
@@ -73,6 +160,9 @@ export function questionsForUser(state: State): QuestionState[] {
 export function renderBrief(state: State, config: Config, errors = 0): string {
   const lines: string[] = ["# slotledger project state"];
   if (errors) lines.push(`⚠ slotledger failed to sync ${errors} time(s) (.project/run/errors.log); some records may be missing.`);
+  if (config.requires && compareVersions(config.requires, PKG.version) > 0) {
+    lines.push(`⚠ This project's records need slotledger ${config.requires} or later, and this is ${PKG.version}: some of them are skipped, so this state may be wrong. Tell the user to upgrade with \`npx slotledger@latest init\` before relying on it.`);
+  }
   lines.push("", ...settingsBrief(config));
 
   const slots = live(state);
@@ -99,19 +189,27 @@ export function renderBrief(state: State, config: Config, errors = 0): string {
     lines.push("If two are the same decision, merge them: record the one to keep with replaces: [the other]. If they're different, leave them.");
   }
 
+  const removed = removedPremises(state);
+  if (removed.length) {
+    lines.push("", "## Removed premises");
+    for (const k of removed) lines.push(removedPremiseText(state, k));
+  }
+
   const qs = openQuestions(state);
   if (qs.length) {
     lines.push("", "## Open questions");
     for (const q of qs) lines.push(`- (${q.qid}) ${q.text}`);
   }
 
-  const tasks = [...state.tasks.values()].filter((t) => t.status !== "dropped" && t.status !== "verified");
-  if (tasks.length) {
+  const tasks = [...state.tasks.values()].filter((t) => t.lifecycle === "live" && t.status !== "dropped" && t.status !== "verified");
+  const suspended = [...state.tasks.values()].filter((t) => t.lifecycle === "suspended" && t.progress !== "dropped");
+  if (tasks.length || suspended.length) {
     lines.push("", "## Tasks");
     for (const t of tasks) {
-      const review = t.status === "needs_review" ? ` (changed: ${t.needsReview.map((d) => d.key).join(", ")})` : "";
-      lines.push(`- ${t.slug} [${t.status}] ${t.title}${review}`);
+      const review = t.status === "needs_review" ? ` (changed: ${t.needsReview.map((d) => d.key).join(", ")})` : waitingNote(t);
+      lines.push(`- ${t.slug} [${t.status}] ${t.title}${review}${handoffNote(t)}`);
     }
+    if (suspended.length) lines.push(`- Suspended: ${suspended.map((t) => t.slug).join(", ")} (task({ slug }) shows one; lifecycle "live" resumes it)`);
   }
 
   lines.push(
@@ -182,14 +280,14 @@ export function renderStatusMd(state: State): string {
   out.push("", "## Open questions", "");
   out.push(...(qs.length ? qs.map((q) => `- ${q.text}`) : ["(none)"]));
 
-  const tasks = [...state.tasks.values()].filter((t) => t.status !== "dropped");
+  const tasks = [...state.tasks.values()].filter((t) => t.lifecycle !== "archived" && t.status !== "dropped");
   out.push("", "## Tasks", "");
   if (tasks.length) {
     out.push("| Task | Status | Verification |", "|---|---|---|");
     for (const t of tasks) {
       const ev = esc(verificationLine(t));
-      const review = t.status === "needs_review" ? ` (${t.needsReview.map((d) => d.key).join(", ")} changed)` : "";
-      out.push(`| ${esc(t.title)} | ${t.status}${review} | ${ev} |`);
+      const review = t.status === "needs_review" ? ` (${t.needsReview.map((d) => d.key).join(", ")} changed)` : waitingNote(t);
+      out.push(`| ${esc(t.title)} | ${t.status}${t.lifecycle === "suspended" ? " (suspended)" : ""}${review} | ${ev} |`);
     }
   } else {
     out.push("(none)");
@@ -307,15 +405,18 @@ export function buildNudge(state: State, analysis: Analysis | null, strictness: 
       parts.push({ key: `schema:${analysis.schemaUndeclared.join(",")}`, text: `Schema/migration/interface files changed (${analysis.schemaUndeclared.slice(0, 3).join(", ")}), but nothing was recorded under approach.` });
     }
     for (const d of analysis.newDocs) {
-      parts.push({ key: `doc:${d}`, text: `New document ${d}. If it holds decisions, plans, or todos, record them with record / task (the document itself can stay).` });
+      parts.push({ key: `doc:${d}`, text: `New document ${d}. If it holds decisions, plans, todos or a handoff, record them with record / task (a handoff goes in task({ slug, handoff })); the document itself can stay.` });
     }
   }
-  const selfReview = live(state).filter((s) => s.stale.length && !GUARDED.includes(s.category));
+  // a gone premise is one decision about its whole chain, not one review per thing resting on it
+  for (const k of removedPremises(state)) parts.push({ key: `gone:${k}`, text: removedPremiseText(state, k) });
+  const selfReview = live(state).filter((s) => s.stale.some((d) => !d.gone) && !GUARDED.includes(s.category));
   for (const s of selfReview) {
-    parts.push({ key: `stale:${s.key}@${s.current!.n}`, text: `The premise of ${s.key} "${s.current!.value}" changed${staleNote(s).replace(" ⚠ premise changed", "")}. Review it: if it still holds, record the same value (this locks the new dependency versions); otherwise change it.` });
+    parts.push({ key: `stale:${s.key}@${s.current!.n}`, text: `The premise of ${s.key} "${s.current!.value}" changed${staleNote(s).replace(" ⚠ premise changed", "")}. Review it: if it still holds, record the same value (this re-locks its premises without a new version, and clears what waits on it); otherwise change it.` });
   }
   for (const t of state.tasks.values()) {
-    if (t.status === "needs_review") {
+    if (t.lifecycle !== "live") continue;
+    if (t.status === "needs_review" && t.needsReview.some((d) => !d.gone)) {
       parts.push({ key: `task:${t.slug}:${t.needsReview.map((d) => `${d.key}@${d.current}`).join(",")}`, text: reviewHint(t) });
     }
     if (strictness === "strict" && t.status === "implemented") {

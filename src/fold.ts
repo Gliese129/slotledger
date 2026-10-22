@@ -1,5 +1,5 @@
 import { shortHash } from "./store.js";
-import type { AnyEvent, Category, Config, Dep, Evidence, HumanTag, QOption, SlotKey, Snapshot, TaskStatus } from "./types.js";
+import type { AnyEvent, Category, Config, Dep, Evidence, HumanTag, QOption, SlotKey, Snapshot, TaskLifecycle, TaskStatus } from "./types.js";
 import { canonicalEvent, categoryOf, legacyKey } from "./types.js";
 
 export type VersionStatus = "proposed" | "decided" | "accepted_by_default" | "rejected";
@@ -24,12 +24,18 @@ export interface VersionState {
   status: VersionStatus;
   /** Set when a human made, approved, or rejected this version */
   tag?: HumanTag;
+  /** Times it was found to still hold after a premise changed (re-locked, no new version) */
+  reviews: { at: string; note: string; by: "user" | "agent" }[];
+  splitFrom?: SlotKey;
+  splitInto?: SlotKey[];
 }
 
 export interface StaleDep {
   key: SlotKey;
   locked: number;
   current: number;
+  /** Deleted, retired or withdrawn with nothing taking its place: whatever rests on it must stand without it or go too */
+  gone?: boolean;
 }
 
 export interface SlotState {
@@ -58,7 +64,15 @@ export interface TaskState {
   evidence?: Evidence & { at: string };
   lastFailed?: Evidence & { at: string };
   session?: string;
+  /** Decisions in basedOn whose value changed: the task itself must be reviewed */
   needsReview: StaleDep[];
+  /** Decisions in basedOn waiting for their own premise review; the task follows whatever that review decides */
+  waitingOn: SlotKey[];
+  lifecycle: TaskLifecycle;
+  /** Why it was last suspended, archived or resumed */
+  lifecycleNote?: { at: string; note: string };
+  /** changed: decisions it was written against whose value has changed since */
+  handoff?: { text: string; basedOn: Dep[]; at: string; session?: string; changed: StaleDep[] };
 }
 
 export interface QuestionState {
@@ -135,8 +149,13 @@ export function fold(events: AnyEvent[], config: Config): State {
         }
         if (slot.deleted) { slot.deleted = undefined; slot.topics = []; }
         for (const t of d.topics ?? []) if (!slot.topics.includes(t)) slot.topics.push(t);
-        // a re-pointed copy keeps who decided it, whether it was confirmed, and how long it has stood
-        const prev = d.inherit ? slot.versions[d.inherit - 1] : undefined;
+        // A re-pointed copy keeps who decided it, whether it was confirmed, and how long it has stood.
+        // So does an AI version that keeps the value (a new rationale or new premises): only a new value changes ownership.
+        const last = slot.versions.slice(slot.liveFrom).reverse().find((v) => !v.rejected);
+        const sameValue = last && last.value === d.value && !!last.retired === !!d.retired && !d.userQuote && ev.actor.kind !== "human";
+        // a piece of a split keeps the owner of what it was split from, unless the split needs the user's say first
+        const origin = d.splitFrom?.keepOwner ? slots.get(d.splitFrom.key)?.versions[d.splitFrom.n - 1] : undefined;
+        const prev = d.inherit ? slot.versions[d.inherit - 1] : sameValue ? last : origin;
         const source = prev ? prev.source : ev.actor.kind === "human" || d.userQuote ? "user" : "agent";
         slot.versions.push({
           n: slot.versions.length + 1,
@@ -147,6 +166,8 @@ export function fold(events: AnyEvent[], config: Config): State {
           scope: d.scope,
           retired: d.retired,
           ...(d.replacedBy ? { replacedBy: d.replacedBy } : {}),
+          ...(d.splitInto ? { splitInto: d.splitInto } : {}),
+          ...(d.splitFrom ? { splitFrom: d.splitFrom.key } : {}),
           userQuote: d.userQuote ?? prev?.userQuote,
           session: prev ? prev.session : sid,
           at: ev.at,
@@ -154,11 +175,24 @@ export function fold(events: AnyEvent[], config: Config): State {
           eventId: ev.id,
           confirmed: prev?.confirmed ?? false,
           status: "proposed",
+          reviews: [],
           ...(prev?.tag ? { tag: prev.tag } : ev.actor.kind === "human" && ev.actor.channel === "web" && d.action === "edit" ? { tag: "human-edit" as const } : source === "user" ? { tag: "human-decided" as const } : {}),
         });
         if (sid) {
           const s = sessions.get(sid);
           if (s && !s.wrote.includes(d.key)) s.wrote.push(d.key);
+        }
+        break;
+      }
+      case "slot.relocked": {
+        const v = slots.get(ev.data.key)?.versions[ev.data.n - 1];
+        if (v) {
+          v.depends = ev.data.depends;
+          if (ev.data.repoint) break;
+          const byUser = ev.actor.kind === "human" || !!ev.data.userQuote;
+          v.reviews.push({ at: ev.at, note: ev.data.note, by: byUser ? "user" : "agent" });
+          // the user saying an AI decision still holds is approving it
+          if (byUser && v.source === "agent" && !v.confirmed) { v.confirmed = true; v.tag = "human-approved"; }
         }
         break;
       }
@@ -183,7 +217,7 @@ export function fold(events: AnyEvent[], config: Config): State {
       case "task.created": {
         const d = ev.data;
         if (!tasks.has(d.slug)) {
-          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", progress: "todo", session: sid, needsReview: [] });
+          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", progress: "todo", session: sid, needsReview: [], waitingOn: [], lifecycle: "live" });
         }
         break;
       }
@@ -204,6 +238,25 @@ export function fold(events: AnyEvent[], config: Config): State {
       case "task.rebased": {
         const t = tasks.get(ev.data.slug);
         if (t) t.basedOn = ev.data.basedOn;
+        break;
+      }
+      case "task.edited": {
+        const t = tasks.get(ev.data.slug);
+        if (t) {
+          if (ev.data.title) t.title = ev.data.title;
+          if (ev.data.note !== undefined) t.note = ev.data.note;
+          if (ev.data.rootCause) t.rootCause = ev.data.rootCause;
+        }
+        break;
+      }
+      case "task.handoff": {
+        const t = tasks.get(ev.data.slug);
+        if (t) t.handoff = { text: ev.data.text, basedOn: ev.data.basedOn, at: ev.at, session: sid, changed: [] };
+        break;
+      }
+      case "task.lifecycle": {
+        const t = tasks.get(ev.data.slug);
+        if (t) { t.lifecycle = ev.data.lifecycle; t.lifecycleNote = { at: ev.at, note: ev.data.note }; }
         break;
       }
       case "task.verify_failed": {
@@ -235,9 +288,16 @@ export function fold(events: AnyEvent[], config: Config): State {
     slot.current = slot.versions.slice(slot.liveFrom).reverse().find((v) => v.status !== "rejected");
   }
 
-  const currentN = (k: SlotKey) => slots.get(k)?.current?.n ?? 0;
-  const staleOf = (deps: Dep[]) =>
-    deps.filter((d) => currentN(d.key) !== d.n).map((d) => ({ key: d.key, locked: d.n, current: currentN(d.key) }));
+  // A premise is stale only when what it says changed: a new value, retired, deleted or rejected.
+  // A new version that keeps the value (a reworded rationale, a re-confirmation from before slot.relocked existed) passes through.
+  const staleOf = (deps: Dep[]): StaleDep[] =>
+    deps.flatMap((d) => {
+      const s = slots.get(d.key);
+      const cur = s?.current;
+      const locked = s?.versions[d.n - 1];
+      if (cur && !cur.retired && locked && !locked.retired && locked.value === cur.value) return [];
+      return [{ key: d.key, locked: d.n, current: cur?.n ?? 0, ...(!cur || cur.retired ? { gone: true } : {}) }];
+    });
 
   // Stale markers, and the questions generated from stale premises
   for (const slot of slots.values()) {
@@ -270,18 +330,39 @@ export function fold(events: AnyEvent[], config: Config): State {
     }
   }
 
-  // A task also needs review when a decision it is based on has a stale premise (e.g. an MSI installer based on the Windows env, whose premise changed)
+  // A task needs review only when a decision it is based on changed. When that decision is itself waiting on a changed premise
+  // (an MSI installer based on the Windows env, whose premise changed), the task waits for that review instead of asking for its own:
+  // confirming the decision clears it, and a new value makes it needs_review.
   for (const t of tasks.values()) {
-    const direct = staleOf(t.basedOn);
-    const indirect = t.basedOn
-      .filter((d) => !direct.some((x) => x.key === d.key) && (slots.get(d.key)?.stale.length ?? 0) > 0)
-      .map((d) => ({ key: d.key, locked: d.n, current: d.n }));
-    t.needsReview = [...direct, ...indirect];
+    t.needsReview = staleOf(t.basedOn);
+    t.waitingOn = t.basedOn
+      .filter((d) => !t.needsReview.some((x) => x.key === d.key) && (slots.get(d.key)?.stale.length ?? 0) > 0)
+      .map((d) => d.key);
     t.status = t.needsReview.length && t.progress !== "dropped" ? "needs_review" : t.progress;
+    if (t.handoff) t.handoff.changed = staleOf(t.handoff.basedOn);
   }
   for (const q of questions.values()) if (answered.has(q.qid)) q.status = "answered";
 
   return { slots, tasks, questions, sessions };
+}
+
+/** Decisions nothing live uses any more: once relied on by a decision or a task, now only by retired decisions and dropped tasks.
+ *  Goals and constraints stand on their own, so they never count. A suspended task still counts, and so does a verified one even when archived: the work it did is there. */
+export function orphans(state: State): SlotState[] {
+  const used = new Set<SlotKey>();
+  const ever = new Set<SlotKey>();
+  for (const s of state.slots.values()) {
+    for (const v of s.versions) for (const d of v.depends) ever.add(d.key);
+    if (s.current && !s.current.retired && !s.deleted) for (const d of s.current.depends) used.add(d.key);
+  }
+  for (const t of state.tasks.values()) {
+    for (const d of t.basedOn) {
+      ever.add(d.key);
+      if (t.progress !== "dropped") used.add(d.key);
+    }
+  }
+  return [...state.slots.values()].filter((s) =>
+    s.current && !s.current.retired && !s.deleted && !["goal", "constraint"].includes(s.category) && ever.has(s.key) && !used.has(s.key));
 }
 
 /** Every live slot whose current version depends on key */

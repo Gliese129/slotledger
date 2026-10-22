@@ -87,6 +87,7 @@ body.open .cols { grid-template-columns: 1fr; }
 .dot.proposed, .dot.in_progress, .dot.implemented { background: var(--warn); }
 .dot.accepted_by_default, .dot.todo { background: var(--info); }
 .dot.rejected, .dot.stale, .dot.question, .dot.needs_review { background: var(--bad); }
+.handoff { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
 .dot.retired, .dot.dropped { background: transparent; border: 1.5px solid var(--gray); }
 .flag { font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 10px; line-height: 18px; }
 .flag.bad { background: var(--bad-soft); color: var(--bad); }
@@ -205,7 +206,7 @@ const CAT_TAG = { goal: "Goal", approach: "Approach", env: "Environment", assum:
 const tag = (c) => h`<span class="tag ${c}">${CAT_TAG[c] ?? c}</span>`;
 const nameOf = (key) => key.slice(key.indexOf("/") + 1);
 const STATUS = { decided: "Decided", proposed: "Proposed by AI", accepted_by_default: "Accepted by default", rejected: "Rejected", retired: "Retired", deleted: "Deleted" };
-const TASK = { needs_review: "Needs review", in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped" };
+const TASK = { needs_review: "Needs review", in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped", suspended: "Suspended", archived: "Archived" };
 const TABS = [["overview", "Overview"], ["decisions", "Decisions"], ["tasks", "Tasks"], ["activity", "Activity"]];
 const ASKS = ["goal", "approach", "env", "assum"]; // categories the end-of-turn report asks about
 const TOKEN = "__SLOTLEDGER_TOKEN__"; // filled in by the server; writes are refused without it
@@ -258,7 +259,7 @@ function derive() {
   // stale ones already covered by a question for the user are not listed twice
   const asked = new Set(userQs.flatMap((q) => (q.origin === "stale_premise" ? [q.about[0]] : [])));
   const stale = data.slots.filter((s) => live(s) && s.stale.length && !asked.has(s.key));
-  const openTasks = data.tasks.filter((t) => t.status !== "verified" && t.status !== "dropped");
+  const openTasks = data.tasks.filter((t) => t.lifecycle === "live" && t.status !== "verified" && t.status !== "dropped");
   const review = openTasks.filter((t) => t.status === "needs_review");
   const starts = data.sessions.map((s) => ({ id: s.id, at: s.start.at }));
   const sessionsSince = (v) => new Set(starts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id)).size;
@@ -276,10 +277,10 @@ function slotRow(s, wide = true, quick = false) {
 }
 function taskRow(t) {
   const failed = t.lastFailed && (!t.evidence || t.lastFailed.at > t.evidence.at);
-  return h`<div class="row ${t.status === "dropped" ? "dim" : ""} ${isSel("task", t.slug) ? "sel" : ""}" ${open("task", t.slug)}>
+  return h`<div class="row ${t.status === "dropped" || t.lifecycle !== "live" ? "dim" : ""} ${isSel("task", t.slug) ? "sel" : ""}" ${open("task", t.slug)}>
     <span class="dot ${t.status}" title="${TASK[t.status]}"></span>
     <span class="main"><span class="t">${t.title}</span><span class="k">${t.slug}</span></span>
-    <span class="side">${failed && t.status !== "verified" ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "needs_review" ? h`<span class="flag bad">needs review</span>` : t.status === "verified" ? h`<span class="flag ok">verified</span>` : ""}</span>
+    <span class="side">${failed && t.status !== "verified" ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "needs_review" ? h`<span class="flag bad">needs review</span>` : t.status === "verified" ? h`<span class="flag ok">verified</span>` : t.waitingOn?.length ? h`<span class="flag warn">waiting on review</span>` : ""}</span>
   </div>`;
 }
 function questionRow(q) {
@@ -350,17 +351,19 @@ function decisions() {
 }
 
 function tasks() {
-  const order = ["needs_review", "in_progress", "todo", "implemented", "verified", "dropped"];
+  const order = ["needs_review", "in_progress", "todo", "implemented", "verified", "suspended", "dropped", "archived"];
   const ts = data.tasks.filter((t) => match(t.slug, t.title, t.note));
+  const group = (t) => (t.lifecycle !== "live" ? t.lifecycle : t.status);
   return h`
     <h1 class="page-title">Tasks</h1>
     <p class="page-sub">Work only counts as verified with evidence: a command slotledger ran, a referenced report or record, or a person's acceptance. Each shows its source.</p>
     ${order.map((st) => {
-      const l = ts.filter((t) => t.status === st);
+      const l = ts.filter((t) => group(t) === st);
       if (!l.length) return "";
-      // dropped starts collapsed, so for it the stored key means "opened"
-      const key = st === "dropped" ? "task:dropped:open" : "task:" + st;
-      const closed = st === "dropped" ? !ui.closed.has(key) : ui.closed.has(key);
+      // dropped and archived start collapsed, so for them the stored key means "opened"
+      const folded = st === "dropped" || st === "archived";
+      const key = folded ? `task:${st}:open` : "task:" + st;
+      const closed = folded ? !ui.closed.has(key) : ui.closed.has(key);
       return h`<h2 class="group ${closed ? "closed" : ""}" data-toggle="${key}">${TASK[st]} <span class="n">${l.length}</span></h2>${closed ? "" : list(l.map(taskRow))}`;
     })}
     ${ts.length ? "" : h`<div class="calm">${data.tasks.length ? "No tasks match." : "No tasks yet."}</div>`}`;
@@ -378,8 +381,12 @@ function describe(e) {
   switch (e.type) {
     case "session.started": return ["plain", ["slot", null], `Session ${short(d.session)} started`];
     case "session.ended": return ["plain", ["slot", null], `Session ${short(d.session)} ended`];
-    case "slot.versioned": return [d.retired ? "retired" : "decided", ["slot", d.key], d.retired ? `Retired ${d.key}${d.replacedBy ? `, merged into ${d.replacedBy}` : ""}` : d.action === "edit" ? `Edited ${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}` : d.action === "keep" ? `Kept ${d.key} after its premise changed` : `${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}`];
+    case "slot.versioned": return [d.retired ? "retired" : "decided", ["slot", d.key], d.retired ? `Retired ${d.key}${d.replacedBy ? `, merged into ${d.replacedBy}` : d.splitInto ? `, split into ${d.splitInto.join(", ")}` : ""}` : d.action === "edit" ? `Edited ${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}` : d.action === "keep" ? `Kept ${d.key} after its premise changed` : `${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}`];
     case "slot.deleted": return ["deleted", ["slot", d.key], `Deleted ${d.key}`];
+    case "slot.relocked": return ["decided", ["slot", d.key], d.repoint ? `${d.key} now rests on the pieces of a split` : `${d.key} v${d.n} still holds: ${d.note}`];
+    case "task.edited": return ["plain", ["task", d.slug], d.title ? `Renamed ${d.slug} to “${d.title}”` : `Updated ${t(d.slug)}${d.note ? `: ${d.note}` : ""}`];
+    case "task.handoff": return ["plain", ["task", d.slug], `Wrote a handoff for ${t(d.slug)}`];
+    case "task.lifecycle": return ["dropped", ["task", d.slug], `${d.lifecycle === "live" ? "Resumed" : d.lifecycle === "suspended" ? "Suspended" : "Archived"} ${t(d.slug)}: ${d.note}`];
     case "version.confirmed": return ["decided", ["slot", d.key], `Approved ${d.key} v${d.n}`];
     case "version.rejected": return ["rejected", ["slot", d.key], `Rejected ${d.key} v${d.n}${d.replacement ? `, replaced with “${d.replacement}”` : ""}`];
     case "task.created": return ["todo", ["task", d.slug], `New task: ${d.title}`];
@@ -453,6 +460,8 @@ function slotDetail(s) {
       ${s.deleted ? h`<div class="alert"><p>You deleted this ${when(s.deleted.at)}. The AI doesn't see it any more, and the key can be used again.</p></div>` : ""}
       ${slotActions(s)}
       ${v.replacedBy ? h`<div class="alert warn"><p>Merged into <a href="#${ui.tab}/slot/${v.replacedBy}"><b>${v.replacedBy}</b></a>; it is kept only for history.</p></div>` : ""}
+      ${v.splitInto ? h`<div class="alert warn"><p>Split into ${v.splitInto.map((k, i) => h`${i ? ", " : ""}<a href="#${ui.tab}/slot/${k}"><b>${k}</b></a>`)}; it is kept only for history.</p></div>` : ""}
+      ${v.splitFrom ? h`<p class="hint">Split from <a href="#${ui.tab}/slot/${v.splitFrom}">${v.splitFrom}</a>.</p>` : ""}
       ${left ? h`<div class="alert warn"><p>Proposed by the AI. It becomes accepted by default after ${left} more session${left > 1 ? "s" : ""} unless you object. To change it, tell Claude in your session.</p></div>` : ""}
       ${sec("Why", h`<p>${v.rationale}</p>${v.userQuote ? h`<div class="quote">${v.userQuote}</div>` : ""}`)}
       ${sec("Rests on", deps.length ? h`<div class="mini">${deps.map((d) => slotRow(d, false))}</div>` : "")}
@@ -463,9 +472,10 @@ function slotDetail(s) {
         ${v.scope?.length ? h`<dt>Scope</dt><dd>${v.scope.map((p) => h`<code>${p}</code> `)}</dd>` : ""}
         ${v.session ? h`<dt>Session</dt><dd class="mono">${short(v.session)}</dd>` : ""}
       </dl>`)}
-      ${s.versions.length > 1 ? sec(`History · ${s.versions.length} versions`, h`<ul class="hist">${[...s.versions].reverse().map((x) => h`<li class="${x.n === v.n ? "cur" : ""}">
+      ${s.versions.length > 1 || v.reviews?.length ? sec(`History · ${s.versions.length} version${s.versions.length > 1 ? "s" : ""}`, h`<ul class="hist">${[...s.versions].reverse().map((x) => h`<li class="${x.n === v.n ? "cur" : ""}">
         <div><span class="v">v${x.n}</span>${x.value}${x.retired ? " (retired)" : ""}</div>
         <div class="m">${STATUS[x.status]} · ${x.source === "user" ? "from you" : "from AI"} · ${when(x.at)}</div>
+        ${(x.reviews ?? []).map((r) => h`<div class="m">Still holds (${r.by === "user" ? "you" : "AI"}, ${when(r.at)}): ${r.note}</div>`)}
         ${x.n !== v.n ? h`<details><summary>Why</summary><p class="hint">${x.rationale}</p>${x.userQuote ? h`<div class="quote">${x.userQuote}</div>` : ""}</details>` : ""}
       </li>`)}</ul>`) : ""}
     </div>`;
@@ -479,8 +489,14 @@ function taskDetail(t) {
     <div class="d-body">
       <div class="d-title">${t.title}</div>
       <div class="d-status"><span class="flag ${t.status === "verified" ? "ok" : t.status === "dropped" ? "gray" : t.status === "needs_review" ? "bad" : "warn"}">${TASK[t.status]}</span>${t.note ? h`<span>${t.note}</span>` : ""}</div>
+      ${t.lifecycle !== "live" && t.lifecycleNote ? h`<p class="hint">${TASK[t.lifecycle]} ${when(t.lifecycleNote.at)}: ${t.lifecycleNote.note}</p>` : ""}
+      ${t.status !== "needs_review" && t.waitingOn?.length ? h`<p class="hint">Waiting on the review of ${t.waitingOn.join(", ")}, whose premises changed. If they still hold, this task needs nothing; if they change, it comes back for review.</p>` : ""}
       ${t.status === "needs_review" ? h`<div class="alert"><p>Decisions it's based on changed: ${t.needsReview.map((x) => x.key).join(", ")}. The AI re-verifies it, confirms it still holds, or drops it${t.progress === "verified" ? "; the pass below is from before the change" : ""}.</p></div>` : ""}
       ${t.rootCause ? sec("Root cause", h`<p>${t.rootCause}</p>`) : ""}
+      ${t.handoff ? sec("Handoff", h`
+        ${t.handoff.changed.length ? h`<div class="alert"><p>Changed since this was written: ${t.handoff.changed.map((x) => x.key).join(", ")}. Where it relies on them, follow the current decision.</p></div>` : ""}
+        <p class="hint">Written ${when(t.handoff.at)}</p>
+        <div class="handoff">${t.handoff.text}</div>`) : ""}
       ${sec("Verification", h`
         ${ev ? evidence(ev, true) : ""}
         ${fail ? evidence(fail, false) : ""}

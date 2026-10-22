@@ -73,8 +73,10 @@ Commit `.project/events.jsonl` with your code: the state then follows branches a
 
 | Tool | When the AI calls it |
 |---|---|
-| `record` | It makes or changes a decision. Same key again means a new version. |
-| `task` | It starts, advances, or drops a piece of work, by slug. |
+| `record` | It makes or changes a decision. A new value means a new version; the same value after a premise changed confirms it still holds, without one. `unaffected` marks, in one call, what rests on a change but isn't affected by it. |
+| `task` | It starts, advances, renames, suspends, or drops a piece of work, by slug. A `handoff` note for whoever picks the task up is locked to the decisions it rests on. |
+| `split` | A decision bundles several things that change separately. It is replaced by finer pieces, and each decision or task that rested on it is pointed at the pieces it needs, several splits in one call. |
+| `archive` | Finished or abandoned tasks leave the brief, and decisions are retired, several at once. It lists decisions nothing uses any more. |
 | `verify` | Before claiming something works, with one kind of evidence: a command slotledger runs (run), evidence produced elsewhere such as a report or a job ID (ref, local files hashed), or a person's acceptance in their words (human). |
 | `ask` | It needs your call while you're away. The question goes into the report. |
 | `respond` | You reply to the report (`1A`, `withdraw 2`) or answer a question. |
@@ -135,16 +137,21 @@ To keep a team in the loop, ask the AI to put the project state in your shared d
 
 - `.project/events.jsonl` is an append-only log and the only real data. Current state is a fold over it, recomputed on every read.
 - A slot's key never changes; its value moves forward in versions. Each version records its rationale, its source (you or the AI), and the exact versions of the slots it depends on.
+- Only a new value (or a retired, deleted or rejected one) makes what rests on it stale, and only one level down. Confirming a decision still holds re-locks its premises without a new version, so nothing further down is asked again; a task waits on its decision's review instead of needing its own.
+- When a premise is deleted or retired with nothing in its place, the AI sees the whole chain resting on it and must decide, for each thing directly on it, whether it stands without it (the dependency is dropped) or goes too. Re-confirming can't drop it quietly.
+- Tasks have a lifecycle apart from their status: live, suspended (on hold, out of the list and reminders) or archived.
+- `split` replaces a decision with finer pieces and re-points what rested on it to the pieces it needs, without asking for review; after that, changing one piece only reaches what rests on it.
 - Stale premises, confirmation state (`proposed`, `decided`, `accepted_by_default` after N sessions without objection, `rejected`), and the questions they raise are derived, never stored.
 - Hooks and the MCP server fail open: if slotledger errors, the AI keeps working and the brief notes what wasn't synced.
 
 ## Status
 
-0.1, and it works on itself: this repo is developed with slotledger tracking it. Known gaps:
+0.2, and it works on itself: this repo is developed with slotledger tracking it. Known gaps:
 
 - Automatic lifecycle checks require enabled, trusted hooks. Without them, the agent must call `brief` and `checkpoint`.
 - With two sessions in the same working tree, each one is blamed for the other's changes. Telling human edits from AI edits isn't implemented yet.
-- A task's `basedOn` can't be re-pinned after creation, so it keeps its review flag once a decision it rests on changes.
+- A dependency covers a whole decision. When dependents rest on different parts of one, the AI splits it with `split`; until then, `unaffected` handles a change in one call.
+- `.project/config.json` records the oldest slotledger that reads the log correctly (`requires`), and older versions warn in the brief. 0.1.x predates this check, so everyone on a repository should move to 0.2 together.
 
 ## Development
 

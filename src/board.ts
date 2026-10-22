@@ -4,10 +4,10 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join, resolve } from "node:path";
 import { analyze, slotTopics, type Analysis } from "./analyze.js";
-import { dependentsOf, fold, type State } from "./fold.js";
+import { dependentsOf, fold, orphans, type State } from "./fold.js";
 import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
-import { buildNudge, buildReport, formatNudge, renderBrief, renderSearch, renderStatusMd, reviewHint, type Report } from "./report.js";
+import { buildNudge, buildReport, formatNudge, removedPremiseText, renderBrief, renderSearch, renderStatusMd, renderTask, reviewHint, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
 import { similarSlots } from "./similar.js";
 import { Store, ulid } from "./store.js";
@@ -21,8 +21,9 @@ const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
 export interface RecordInput {
   key: string;
-  value: string;
-  rationale: string;
+  /** Left out (with rationale) only to mark dependents unaffected by the slot's latest change */
+  value?: string;
+  rationale?: string;
   depends?: string[];
   topics?: string[];
   scope?: string[];
@@ -32,6 +33,26 @@ export interface RecordInput {
   new?: boolean;
   /** Keys this decision merges in; they are retired and their dependents re-pointed here */
   replaces?: string[];
+  /** Decisions (keys) and tasks (slugs) resting on this slot that its change doesn't affect, with why */
+  unaffected?: { key: string; why: string }[];
+}
+
+export interface SplitInput {
+  /** Each decision to split, and the finer decisions that replace it; pieces keep its depends unless they give their own */
+  splits: { key: string; into: { key: string; value: string; rationale: string; depends?: string[] }[] }[];
+  /** For decisions (keys) and tasks (slugs) resting on a split decision: the pieces they actually rest on. Unlisted ones rest on all pieces */
+  dependents?: { key: string; on: string[] }[];
+  note: string;
+  userQuote?: string;
+}
+
+export interface ArchiveInput {
+  /** Task slugs; ones not verified or dropped are dropped first */
+  tasks?: string[];
+  /** Decision keys to retire */
+  decisions?: string[];
+  note: string;
+  userQuote?: string;
 }
 
 export interface TaskInput {
@@ -41,6 +62,12 @@ export interface TaskInput {
   basedOn?: string[];
   rootCause?: string;
   note?: string;
+  /** A one-off handoff note (Markdown) for whoever picks the task up */
+  handoff?: string;
+  /** Decisions the handoff also rests on, besides basedOn */
+  handoffOn?: string[];
+  /** Put a task on hold (suspended) or back in play (live); archiving goes through archive */
+  lifecycle?: "live" | "suspended";
 }
 
 export interface VerifyInput {
@@ -89,6 +116,17 @@ export interface HumanAction {
 
 const WEB: Actor = { kind: "human", channel: "web" };
 
+/** Decisions that something just made unused, with how to retire them together */
+function orphanNote(before: State, after: State): string[] {
+  const had = new Set(orphans(before).map((s) => s.key));
+  const now = orphans(after).filter((s) => !had.has(s.key));
+  if (!now.length) return [];
+  return [
+    `Nothing live uses these any more: ${now.map((s) => `${s.key} "${s.current!.value}"`).join("; ")}. ` +
+      `If they're no longer needed, retire them together: archive({ decisions: [${now.map((s) => `"${s.key}"`).join(", ")}], note }).`,
+  ];
+}
+
 export interface Client {
   name: string;
   version: string;
@@ -127,7 +165,10 @@ export class Board {
   // ---------- record ----------
 
   record(session: string, raw: RecordInput): string {
-    const input = { ...raw, key: canonicalKey(raw.key), depends: raw.depends?.map(canonicalKey), replaces: raw.replaces?.map(canonicalKey) };
+    const input = {
+      ...raw, key: canonicalKey(raw.key), depends: raw.depends?.map(canonicalKey), replaces: raw.replaces?.map(canonicalKey),
+      unaffected: raw.unaffected?.map((u) => ({ key: u.key.includes("/") ? canonicalKey(u.key) : u.key, why: u.why?.trim() ?? "" })),
+    };
     const cat = categoryOf(input.key);
     if (!cat) {
       return `Nothing recorded: execution details don't get slots. If this really is a decision, the key must start with a category: ${CATEGORIES.map((c) => c + "/").join(" ")}, e.g. approach/sync-backend.`;
@@ -135,9 +176,20 @@ export class Board {
     const name = input.key.slice(cat.length + 1);
     if (!SLUG.test(name)) throw new FixableError(`Key must look like <category>/<lowercase-dashed-name>, e.g. ${cat}/sync-backend; got ${input.key}.`);
     const key = input.key as SlotKey;
-    if (cat === "constraint" && !input.scope?.length) throw new FixableError("A constraint needs scope (the paths or area it covers), e.g. scope: [\"src/legacy/**\"].");
+    if (cat === "constraint" && input.value !== undefined && !input.scope?.length) throw new FixableError("A constraint needs scope (the paths or area it covers), e.g. scope: [\"src/legacy/**\"].");
 
     const { state } = this.load();
+    const unaffected = input.unaffected ?? [];
+    if (unaffected.length) this.checkUnaffected(state, key, unaffected);
+    if (input.value === undefined) {
+      if (!unaffected.length) throw new FixableError("value and rationale are required. Leave them out only to mark dependents unaffected: record({ key, unaffected: [{ key, why }] }).");
+      const lines = this.markUnaffected(session, state, key, unaffected);
+      this.writeStatus();
+      return lines.join("\n");
+    }
+    if (!input.rationale?.trim()) throw new FixableError("rationale is required: why this decision, stated clearly enough to question it when a premise changes.");
+    const value = input.value;
+    const rationale = input.rationale;
     const depends: Dep[] = [];
     for (const d of input.depends ?? []) {
       if (d === key) throw new FixableError("A slot can't depend on itself.");
@@ -167,7 +219,7 @@ export class Board {
 
     // A brand-new key that looks like an existing one: ask once instead of silently adding a near-duplicate
     if (!slot && !input.new && !replaces.length && !input.retired) {
-      const similar = similarSlots(state, { key, value: input.value });
+      const similar = similarSlots(state, { key, value });
       if (similar.length) {
         throw new FixableError([
           `Not recorded yet: ${key} is a new key, but these live decisions look similar:`,
@@ -179,15 +231,31 @@ export class Board {
 
     if (cur) {
       const userOwned = cur.source === "user" || cur.confirmed;
-      const changes = cur.value !== input.value || !!input.retired !== !!cur.retired;
+      const changes = cur.value !== value || !!input.retired !== !!cur.retired;
       if (userOwned && changes && GUARDED.includes(cat) && !input.userQuote) {
         throw new FixableError(
           `${key} is currently the user's decision (v${cur.n} "${cur.value}"). Ask the user before changing it; once they agree, call again with their words in userQuote.`,
         );
       }
-      const sameDeps = JSON.stringify(cur.depends) === JSON.stringify(depends.length ? depends : cur.depends);
-      if (!changes && sameDeps && !slot!.stale.length && JSON.stringify(cur.scope ?? []) === JSON.stringify(input.scope ?? cur.scope ?? []) && !input.userQuote && !replaces.length) {
-        return `${key} is unchanged; nothing recorded.`;
+      const sameDeps = !depends.length || JSON.stringify(depends.map((d) => d.key).sort()) === JSON.stringify(cur.depends.map((d) => d.key).sort());
+      const sameScope = JSON.stringify(cur.scope ?? []) === JSON.stringify(input.scope ?? cur.scope ?? []);
+      // Still holds after a premise changed: re-lock its premises instead of writing a new version, so nothing downstream changes
+      if (!changes && sameDeps && sameScope && slot!.stale.length && !replaces.length) {
+        const gone = slot!.stale.filter((d) => d.gone);
+        if (gone.length) throw new FixableError(`Not recorded: ${gone.map((d) => d.key).join(", ")} ${gone.length > 1 ? "are" : "is"} gone, so re-confirming would quietly drop ${gone.length > 1 ? "them" : "it"}. Decide explicitly:\n${gone.map((d) => removedPremiseText(state, d.key)).join("\n")}`);
+        this.store.append("slot.relocked", { kind: "agent", session }, {
+          key, n: cur.n, depends: this.relock(state, cur.depends), note: rationale, ...(input.userQuote ? { userQuote: input.userQuote } : {}),
+        });
+        const out = [`${key} v${cur.n} still holds after ${slot!.stale.map((d) => d.key).join(", ")} changed; its premises are re-locked, with no new version, so nothing that rests on it needs review.`];
+        if (unaffected.length) out.push(...this.markUnaffected(session, this.load().state, key, unaffected));
+        this.writeStatus();
+        return out.join("\n");
+      }
+      if (!changes && sameDeps && sameScope && !input.userQuote && !replaces.length) {
+        if (!unaffected.length) return `${key} is unchanged; nothing recorded.`;
+        const out = this.markUnaffected(session, state, key, unaffected);
+        this.writeStatus();
+        return out.join("\n");
       }
       // Re-confirming after review: same value and no depends given, so keep the old deps locked to their current versions
       if (!depends.length && cur.depends.length) {
@@ -200,8 +268,8 @@ export class Board {
 
     const main = this.store.append("slot.versioned", { kind: "agent", session }, {
       key,
-      value: input.value,
-      rationale: input.rationale,
+      value,
+      rationale,
       depends,
       topics: input.topics ?? [],
       ...(input.scope?.length ? { scope: input.scope } : cur?.scope ? { scope: cur.scope } : {}),
@@ -218,14 +286,28 @@ export class Board {
     if (cur) out.push(`Replaces v${cur.n} "${cur.value}".`);
     if (merged) out.push(...merged);
 
+    if (unaffected.length) out.push(...this.markUnaffected(session, after, key, unaffected));
     const dependents = dependentsOf(after, key);
-    if (cur && dependents.length) {
-      out.push(
-        `${dependents.length} decision(s) depend on it: ${dependents.map((d) => d.key).join(", ")}; they are now marked as having a stale premise. ` +
-          `If this only extends it and doesn't affect them, confirm each by recording it again with the same value; otherwise review them one by one.`,
-      );
+    const changed = cur && (cur.value !== value || !!input.retired !== !!cur.retired);
+    if (changed) {
+      const done = new Set(unaffected.map((u) => u.key));
+      const open = this.restingOn(this.load().state, key).filter((k) => !done.has(k));
+      if (open.length) {
+        out.push(
+          `These rest on it and now need review: ${open.join(", ")}. Name every one this change doesn't affect in a single call, ` +
+            `record({ key: "${key}", unaffected: [{ key, why }, ...] }), and review only the rest.`,
+        );
+      }
+      // Most of what rests on it didn't care about this change: it probably bundles decisions that change separately
+      if (unaffected.length >= 2 && unaffected.length * 2 >= unaffected.length + open.length) {
+        out.push(
+          `Most of what rests on ${key} isn't affected by this change, so it likely holds several decisions that change separately. ` +
+            `Consider splitting it, and pointing each dependent at the pieces it really rests on: split({ splits: [{ key: "${key}", into: [{ key, value, rationale }, ...] }], dependents: [{ key, on: [pieces] }], note }).`,
+        );
+      }
     }
-    if (!input.depends?.length && !cur?.depends.length) {
+    if (input.retired) out.push(...orphanNote(state, this.load().state));
+    if (!input.depends?.length && !cur?.depends.length && !input.retired) {
       const config = this.store.readConfig();
       const mine = new Set(slotTopics(now, config.topics));
       const downstream = new Set(dependents.map((d) => d.key));
@@ -241,6 +323,210 @@ export class Board {
     if (config.topics.length && !slotTopics(now, config.topics).length) {
       out.push(`Available topics: ${config.topics.map((t) => t.id).join(", ")}. Passing topics makes change detection more accurate.`);
     }
+    return out.join("\n");
+  }
+
+  /** Decisions (keys) and tasks (slugs) that rest on key: the ones its change asks to review */
+  private restingOn(state: State, key: SlotKey): string[] {
+    const slots = dependentsOf(state, key).filter((s) => s.stale.some((d) => d.key === key)).map((s) => s.key as string);
+    const tasks = [...state.tasks.values()].filter((t) => t.lifecycle === "live" && t.progress !== "dropped" && t.needsReview.some((d) => d.key === key)).map((t) => t.slug);
+    return [...slots, ...tasks];
+  }
+
+  /** Every unaffected item must be a live decision or task resting on key, with a reason; checked before anything is written */
+  private checkUnaffected(state: State, key: SlotKey, items: { key: string; why: string }[]): void {
+    const problems: string[] = [];
+    for (const u of items) {
+      if (!u.why) problems.push(`${u.key}: why is required`);
+      else if (u.key.includes("/")) {
+        const cur = state.slots.get(u.key as SlotKey)?.current;
+        if (!cur || cur.retired) problems.push(`${u.key} isn't a live decision`);
+        else if (!cur.depends.some((d) => d.key === key)) problems.push(`${u.key} doesn't depend on ${key}`);
+      } else {
+        const t = state.tasks.get(u.key);
+        if (!t) problems.push(`task ${u.key} doesn't exist`);
+        else if (!t.basedOn.some((d) => d.key === key)) problems.push(`task ${u.key} isn't based on ${key}`);
+      }
+    }
+    if (problems.length) throw new FixableError(`Nothing recorded; fix unaffected: ${problems.join("; ")}. Decisions go by key, tasks by slug.`);
+  }
+
+  /** Re-lock key in each unaffected decision and task to key's current version */
+  private markUnaffected(session: string, state: State, key: SlotKey, items: { key: string; why: string }[]): string[] {
+    const actor: Actor = { kind: "agent", session };
+    const cur = state.slots.get(key)?.current;
+    const n = cur && !cur.retired ? cur.n : undefined;
+    // re-lock to the new version, or drop the dependency when key is gone
+    const relockKey = (deps: Dep[]) => deps.flatMap((d) => (d.key !== key ? [d] : n ? [{ key, n }] : []));
+    for (const u of items) {
+      if (u.key.includes("/")) {
+        const slot = state.slots.get(u.key as SlotKey)!;
+        this.store.append("slot.relocked", actor, { key: slot.key, n: slot.current!.n, depends: relockKey(slot.current!.depends), note: u.why });
+      } else {
+        const t = state.tasks.get(u.key)!;
+        this.store.append("task.rebased", actor, { slug: t.slug, basedOn: relockKey(t.basedOn), note: u.why });
+      }
+    }
+    return [n ? `Marked unaffected by ${key}: ${items.map((u) => u.key).join(", ")}.` : `Dropped the dependency on ${key} from: ${items.map((u) => u.key).join(", ")}.`];
+  }
+
+  // ---------- split ----------
+
+  split(session: string, input: SplitInput): string {
+    const note = input.note?.trim();
+    if (!note) throw new FixableError("split needs a note: why these decisions are being split.");
+    if (!input.splits?.length) throw new FixableError("Pass splits: [{ key, into: [{ key, value, rationale }, ...] }].");
+    const { state } = this.load();
+    const problems: string[] = [];
+    const pieces = new Map<SlotKey, SlotKey[]>();
+    const newKeys = new Set<SlotKey>();
+    for (const sp of input.splits) {
+      const key = canonicalKey(sp.key) as SlotKey;
+      const cur = state.slots.get(key)?.current;
+      if (!cur || cur.retired) { problems.push(`${sp.key} isn't a live decision`); continue; }
+      if (pieces.has(key)) { problems.push(`${key} is split twice`); continue; }
+      if ((sp.into ?? []).length < 2) problems.push(`${key} needs at least two pieces`);
+      const keys: SlotKey[] = [];
+      for (const p of sp.into ?? []) {
+        const k = canonicalKey(p.key) as SlotKey;
+        const cat = categoryOf(k);
+        if (!cat || !SLUG.test(k.slice(cat.length + 1))) problems.push(`${p.key} isn't a valid key (<category>/<dashed-name>)`);
+        else if (newKeys.has(k)) problems.push(`${k} is used for two pieces`);
+        else if (state.slots.get(k)?.current && !state.slots.get(k)!.current!.retired) problems.push(`${k} is already a live decision; pieces need new keys`);
+        else if (!p.value?.trim() || !p.rationale?.trim()) problems.push(`${k} needs value and rationale`);
+        newKeys.add(k);
+        keys.push(k);
+      }
+      pieces.set(key, keys);
+    }
+    for (const k of newKeys) if (pieces.has(k)) problems.push(`${k} is being split, so it can't be a piece`);
+    if (problems.length) throw new FixableError(`Nothing split: ${problems.join("; ")}.`);
+
+    // A dependency on a decision being split, expanded to the given pieces (or all of them)
+    const expand = (deps: SlotKey[], chosen?: Set<SlotKey>): SlotKey[] =>
+      [...new Set(deps.flatMap((k) => (pieces.has(k) ? pieces.get(k)!.filter((p) => !chosen || chosen.has(p)) : [k])))];
+    const nOf = (k: SlotKey) => (newKeys.has(k) ? (state.slots.get(k)?.versions.length ?? 0) + 1 : state.slots.get(k)!.current!.n);
+
+    // What rests on a split decision, apart from the decisions being split themselves
+    const restingDecisions = [...state.slots.values()].filter((s) => s.current && !s.current.retired && !pieces.has(s.key) && s.current.depends.some((d) => pieces.has(d.key)));
+    const restingTasks = [...state.tasks.values()].filter((t) => t.lifecycle !== "archived" && t.progress !== "dropped" && t.basedOn.some((d) => pieces.has(d.key)));
+    const chosen = new Map<string, Set<SlotKey>>();
+    for (const d of input.dependents ?? []) {
+      const id = d.key.includes("/") ? canonicalKey(d.key) : d.key;
+      const deps = id.includes("/") ? restingDecisions.find((s) => s.key === id)?.current!.depends : restingTasks.find((t) => t.slug === id)?.basedOn;
+      if (!deps) { problems.push(`${d.key} doesn't rest on a decision being split`); continue; }
+      const allowed = new Set(deps.flatMap((x) => pieces.get(x.key) ?? []));
+      const on = (d.on ?? []).map((k) => canonicalKey(k) as SlotKey);
+      for (const k of on) if (!allowed.has(k)) problems.push(`${d.key} can only rest on pieces of what it depended on (${[...allowed].join(", ")}); got ${k}`);
+      chosen.set(id, new Set(on));
+    }
+    for (const sp of input.splits) {
+      for (const p of sp.into) for (const dep of p.depends ?? []) {
+        const k = canonicalKey(dep) as SlotKey;
+        if (k === canonicalKey(p.key)) problems.push(`${p.key} can't depend on itself`);
+        else if (!newKeys.has(k) && !pieces.has(k) && !state.slots.get(k)?.current) problems.push(`${p.key} depends on ${dep}, which doesn't exist`);
+      }
+    }
+    if (problems.length) throw new FixableError(`Nothing split: ${problems.join("; ")}.`);
+
+    const actor: Actor = { kind: "agent", session };
+    const out: string[] = [];
+    for (const sp of input.splits) {
+      const key = canonicalKey(sp.key) as SlotKey;
+      const slot = state.slots.get(key)!;
+      const cur = slot.current!;
+      // splitting the user's goal or approach restates it in new words, so the pieces go to the user as proposals unless they agreed
+      const keepOwner = !((cur.source === "user" || cur.confirmed) && GUARDED.includes(slot.category) && !input.userQuote);
+      for (const p of sp.into) {
+        const k = canonicalKey(p.key) as SlotKey;
+        const deps = p.depends ? expand(p.depends.map((d) => canonicalKey(d) as SlotKey)) : expand(cur.depends.map((d) => d.key));
+        this.store.append("slot.versioned", actor, {
+          key: k, value: p.value.trim(), rationale: p.rationale.trim(), depends: deps.map((d) => ({ key: d, n: nOf(d) })), topics: slot.topics,
+          ...(cur.scope ? { scope: cur.scope } : {}), splitFrom: { key, n: cur.n, keepOwner }, ...(input.userQuote ? { userQuote: input.userQuote } : {}),
+        });
+      }
+      out.push(`Split ${key} into ${pieces.get(key)!.join(", ")}${keepOwner ? "" : "; they were the user's decision, so the pieces are proposals for them to confirm"}.`);
+    }
+    const repointed: string[] = [];
+    const broad: string[] = [];
+    const remap = (deps: Dep[], id: string): Dep[] => {
+      const pick = chosen.get(id);
+      if (!pick) broad.push(id);
+      return expand(deps.map((d) => d.key), pick ? new Set([...pick, ...deps.map((d) => d.key)]) : undefined)
+        .map((k) => deps.find((d) => d.key === k) ?? { key: k, n: nOf(k) });
+    };
+    for (const s of restingDecisions) {
+      const depends = remap(s.current!.depends, s.key);
+      this.store.append("slot.relocked", actor, { key: s.key, n: s.current!.n, depends, note: `Re-pointed after a split: ${note}`, repoint: true });
+      repointed.push(`${s.key} → ${depends.filter((d) => newKeys.has(d.key)).map((d) => d.key).join(", ") || "none of the pieces"}`);
+    }
+    for (const t of restingTasks) {
+      const basedOn = remap(t.basedOn, t.slug);
+      this.store.append("task.rebased", actor, { slug: t.slug, basedOn, note: `Re-pointed after a split: ${note}` });
+      repointed.push(`${t.slug} → ${basedOn.filter((d) => newKeys.has(d.key)).map((d) => d.key).join(", ") || "none of the pieces"}`);
+    }
+    for (const [key, keys] of pieces) {
+      const cur = state.slots.get(key)!.current!;
+      this.store.append("slot.versioned", actor, {
+        key, value: cur.value, rationale: `Split into ${keys.join(", ")}: ${note}`, depends: [], topics: [], retired: true, splitInto: keys,
+        ...(input.userQuote ? { userQuote: input.userQuote } : {}),
+      });
+    }
+    if (repointed.length) out.push(`Re-pointed, without asking for review: ${repointed.join("; ")}.`);
+    if (broad.length) {
+      out.push(`Not listed in dependents, so these rest on every piece: ${broad.join(", ")}. If one rests on only some, narrow it: record({ key, value: <same>, rationale, depends }) for a decision, task({ slug, basedOn, note }) for a task.`);
+    }
+    this.writeStatus();
+    return out.join("\n");
+  }
+
+  // ---------- archive ----------
+
+  archive(session: string, input: ArchiveInput): string {
+    const note = input.note?.trim();
+    if (!note) throw new FixableError("archive needs a note: why these are done with.");
+    const slugs = [...new Set(input.tasks ?? [])];
+    const keys = [...new Set((input.decisions ?? []).map((k) => canonicalKey(k) as SlotKey))];
+    if (!slugs.length && !keys.length) throw new FixableError("Pass tasks (slugs) and/or decisions (keys) to archive.");
+    const { state } = this.load();
+    const problems: string[] = [];
+    for (const slug of slugs) {
+      const t = state.tasks.get(slug);
+      if (!t) problems.push(`task ${slug} doesn't exist`);
+      else if (t.lifecycle === "archived") problems.push(`task ${slug} is already archived`);
+    }
+    for (const key of keys) {
+      const slot = state.slots.get(key);
+      const cur = slot?.current;
+      if (!cur || cur.retired) problems.push(`${key} isn't a live decision`);
+      else if ((cur.source === "user" || cur.confirmed) && GUARDED.includes(slot!.category) && !input.userQuote) {
+        problems.push(`${key} is the user's decision; retire it only after the user agrees, with their words in userQuote`);
+      }
+    }
+    if (problems.length) throw new FixableError(`Nothing archived: ${problems.join("; ")}.`);
+
+    const actor: Actor = { kind: "agent", session };
+    const out: string[] = [];
+    for (const slug of slugs) {
+      const t = state.tasks.get(slug)!;
+      if (t.progress !== "verified" && t.progress !== "dropped") {
+        this.store.append("task.status", actor, { slug, status: "dropped", note });
+        out.push(`Dropped ${slug} (it was ${t.status}) and archived it.`);
+      } else out.push(`Archived ${slug} (${t.progress}).`);
+      this.store.append("task.lifecycle", actor, { slug, lifecycle: "archived", note });
+    }
+    for (const key of keys) {
+      const cur = state.slots.get(key)!.current!;
+      this.store.append("slot.versioned", actor, {
+        key, value: cur.value, rationale: `Retired: ${note}`, depends: cur.depends, topics: [], retired: true,
+        ...(cur.scope ? { scope: cur.scope } : {}), ...(input.userQuote ? { userQuote: input.userQuote } : {}),
+      });
+      out.push(`Retired ${key}.`);
+    }
+    const after = this.load().state;
+    for (const k of keys) if (this.restingOn(after, k).length) out.push(removedPremiseText(after, k));
+    out.push(...orphanNote(state, after));
+    this.writeStatus(after);
     return out.join("\n");
   }
 
@@ -265,11 +551,43 @@ export class Board {
       this.store.append("task.rebased", actor, { slug: input.slug, basedOn, note: input.note.trim() });
       out.push(`${input.slug} is now based on ${basedOn.length ? basedOn.map((d) => `${d.key}@${d.n}`).join(", ") : "no decisions"}.`);
     }
-    if (input.status && input.status !== (t?.progress ?? "todo")) {
-      this.store.append("task.status", actor, { slug: input.slug, status: input.status, ...(input.note ? { note: input.note } : {}) });
-      out.push(`${input.slug} → ${input.status}.`);
+    // A new title or root cause, or a note that no status change or re-lock carries, is saved on its own
+    const statusChange = !!input.status && input.status !== (t?.progress ?? "todo");
+    const rebased = !!t && !!basedOn;
+    const lifecycleChange = !!t && !!input.lifecycle && input.lifecycle !== t.lifecycle;
+    const title = t && input.title?.trim() && input.title.trim() !== t.title ? input.title.trim() : undefined;
+    const rootCause = t && input.rootCause?.trim() && input.rootCause.trim() !== t.rootCause ? input.rootCause.trim() : undefined;
+    const note = !rebased && !statusChange && !lifecycleChange && input.note?.trim() && input.note.trim() !== t?.note ? input.note.trim() : undefined;
+    if (title || note || rootCause) {
+      this.store.append("task.edited", actor, { slug: input.slug, ...(title ? { title } : {}), ...(note ? { note } : {}), ...(rootCause ? { rootCause } : {}) });
+      if (t) out.push(`${input.slug}: ${[title && `title is now "${title}"`, note && "note saved", rootCause && "root cause saved"].filter(Boolean).join(", ")}.`);
     }
-    if (!out.length) out.push(`${input.slug} is unchanged.`);
+    if (statusChange) {
+      this.store.append("task.status", actor, { slug: input.slug, status: input.status!, ...(input.note ? { note: input.note } : {}) });
+      out.push(`${input.slug} → ${input.status}.`);
+      if (input.status === "dropped") out.push(...orphanNote(state, this.load().state), `Once it's out of the way, archive({ tasks: ["${input.slug}"], note }) takes it out of the brief.`);
+    }
+    if (lifecycleChange) {
+      const why = input.note?.trim();
+      if (!why) throw new FixableError(`Changing ${input.slug} to ${input.lifecycle} needs a note: why.`);
+      this.store.append("task.lifecycle", actor, { slug: input.slug, lifecycle: input.lifecycle!, note: why });
+      out.push(input.lifecycle === "suspended"
+        ? `Suspended ${input.slug}: it leaves the task list and reminders, but the decisions it rests on still count as in use. Resume it with task({ slug: "${input.slug}", lifecycle: "live", note }).`
+        : `${input.slug} is live again${t.status === "needs_review" ? `; ${reviewHint(t)}` : "."}`);
+    }
+    if (input.handoff !== undefined) {
+      const text = input.handoff.trim();
+      if (!text) throw new FixableError("handoff is empty: write what the next person needs to pick the task up.");
+      const fresh = this.load().state;
+      const keys = [...fresh.tasks.get(input.slug)!.basedOn.map((d) => d.key as string), ...(input.handoffOn ?? [])];
+      const locked = this.lockBasis(fresh, keys);
+      this.store.append("task.handoff", actor, { slug: input.slug, text, basedOn: locked });
+      out.push(`Wrote the handoff for ${input.slug}${locked.length ? `, against ${locked.map((d) => `${d.key}@${d.n}`).join(", ")}` : ""}. It replaces any earlier one; task({ slug: "${input.slug}" }) shows it, with any of these decisions that change before it's picked up.`);
+    }
+    if (!out.length) {
+      this.writeStatus();
+      return renderTask(this.load().state, input.slug);
+    }
     const now = this.load().state.tasks.get(input.slug)!;
     if (now.status === "needs_review") out.push(reviewHint(now));
     else if (input.status === "implemented") out.push(`Before calling it done, use verify with evidence: a command to run (cmd), evidence produced elsewhere (refs), or the user's acceptance (userQuote).`);
@@ -299,6 +617,8 @@ export class Board {
       if (s?.current?.retired && s.current.replacedBy) s = state.slots.get(s.current.replacedBy);
       const cur = s?.current;
       if (s && cur && !cur.retired && !basedOn.some((x) => x.key === s!.key)) basedOn.push({ key: s.key, n: cur.n });
+      // a pass doesn't decide whether the task still stands without a premise that's gone
+      else if (!cur || cur.retired) basedOn.push(d);
     }
     return { basedOn };
   }
@@ -354,10 +674,10 @@ export class Board {
     return `Failed (exit ${exit}${r.error ? `, ${r.error.message}` : ""}). Task status unchanged.\nEnd of output:\n${tail}`;
   }
 
-  /** What a pass left the task at: verified, or still needs_review when a decision it rests on has an unresolved premise itself */
+  /** What a pass left the task at, and any decision review it still follows */
   private statusAfter(slug: string): string {
     const t = this.load().state.tasks.get(slug)!;
-    return t.status === "verified" ? `${slug} is now verified.` : `${slug} still needs review: ${t.needsReview.map((d) => d.key).join(", ")} ${t.needsReview.length > 1 ? "have" : "has"} a changed premise of its own; settle that decision first.`;
+    return `${slug} is now ${t.status}.` + (t.waitingOn.length ? ` It still follows the review of ${t.waitingOn.join(", ")}, whose premises changed: if they change, it comes back for review.` : "");
   }
 
   /** A local file gets hashed so the evidence names the exact version; URLs and IDs in other systems are kept as given */
@@ -429,9 +749,9 @@ export class Board {
       const slot = state.slots.get(q.premise.slot)!;
       const cur = slot.current!;
       if (opt?.id === "A") {
-        this.store.append("slot.versioned", via, {
-          key: slot.key, value: cur.value, rationale: `${cur.rationale} (user confirmed it still holds after ${q.premise.dep.key} became v${q.premise.dep.current})`,
-          depends: this.relock(state, cur.depends), topics: [], ...(cur.scope ? { scope: cur.scope } : {}), userQuote: input.userQuote,
+        this.store.append("slot.relocked", via, {
+          key: slot.key, n: cur.n, depends: this.relock(state, cur.depends),
+          note: `User confirmed it still holds after ${q.premise.dep.key} became v${q.premise.dep.current}`, userQuote: input.userQuote,
         }, ans.id);
         this.writeStatus();
         return `Recorded: ${slot.key} "${cur.value}" still holds (user confirmed).`;
@@ -537,9 +857,8 @@ export class Board {
       }
       case "keep": {
         if (!cur || !slot.stale.length) throw new FixableError(`${slot.key} has no changed premise to confirm.`);
-        this.store.append("slot.versioned", WEB, {
-          key: slot.key, value: cur.value, rationale: `${cur.rationale} (still holds after ${slot.stale.map((d) => d.key).join(", ")} changed)`,
-          depends: this.relock(state, cur.depends), topics: [], ...(cur.scope ? { scope: cur.scope } : {}), action: "keep",
+        this.store.append("slot.relocked", WEB, {
+          key: slot.key, n: cur.n, depends: this.relock(state, cur.depends), note: `Still holds after ${slot.stale.map((d) => d.key).join(", ")} changed`,
         });
         out = `Kept ${slot.key} as it is.`;
         break;
@@ -563,10 +882,11 @@ export class Board {
     return out;
   }
 
+  /** Lock deps to their current versions; ones that are gone are left out */
   private relock(state: State, deps: Dep[]): Dep[] {
     return deps.flatMap((d) => {
-      const n = state.slots.get(d.key)?.current?.n;
-      return n ? [{ key: d.key, n }] : [];
+      const cur = state.slots.get(d.key)?.current;
+      return cur && !cur.retired ? [{ key: d.key, n: cur.n }] : [];
     });
   }
 

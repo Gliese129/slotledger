@@ -53,7 +53,8 @@ describe("slots and staleness", () => {
     seedWindowsWorld();
     start("s2");
     const msg = board.record("s2", { key: "assum/user-os", value: "Users are actually on macOS", rationale: "User corrected it", userQuote: "users are actually on macOS" });
-    expect(msg).toContain("2 decision(s) depend on it");
+    expect(msg).toContain("These rest on it and now need review: approach/sync-backend, env/target-os");
+    expect(msg).toContain('record({ key: "assum/user-os", unaffected:');
 
     const { state } = board.load();
     expect(state.slots.get("approach/sync-backend")!.stale).toEqual([{ key: "assum/user-os", locked: 1, current: 2 }]);
@@ -90,8 +91,11 @@ describe("slots and staleness", () => {
     const { state } = board.load();
     const slot = state.slots.get("approach/sync-backend")!;
     expect(slot.stale).toEqual([]);
-    expect(slot.current!.n).toBe(2);
+    // still holding is not a new decision: no new version, nothing downstream changes
+    expect(slot.versions).toHaveLength(1);
+    expect(slot.current!.depends).toEqual([{ key: "assum/user-os", n: 2 }]);
     expect(slot.current!.status).toBe("decided");
+    expect(slot.current!.reviews).toMatchObject([{ by: "user" }]);
   });
 
   it("an unchanged value is not recorded again", () => {
@@ -163,13 +167,28 @@ describe("tasks and verification", () => {
     expect(readFileSync(join(root, "STATUS.md"), "utf8")).toContain("run: `echo ok` passed");
   });
 
-  it("a task needs review when a decision it is based on has a stale premise", () => {
+  it("a task follows the review of a decision whose premise changed, instead of asking for its own", () => {
     seedWindowsWorld();
     board.task("s1", { slug: "msi-installer", title: "Build the MSI installer", basedOn: ["env/target-os"] });
     start("s2");
     const msg = board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
     expect(msg).not.toContain("Possible premises: env/target-os");
-    expect(board.load().state.tasks.get("msi-installer")!.needsReview).toHaveLength(1);
+    let t = board.load().state.tasks.get("msi-installer")!;
+    expect(t.status).toBe("todo");
+    expect(t.waitingOn).toEqual(["env/target-os"]);
+    expect(board.brief()).toContain("msi-installer [todo] Build the MSI installer (waiting on review of env/target-os)");
+
+    // the decision still holds: the task needs nothing
+    expect(board.record("s2", { key: "env/target-os", value: "Windows 10+", rationale: "Enterprise customers stay on Windows" })).toContain("no new version");
+    t = board.load().state.tasks.get("msi-installer")!;
+    expect(t.waitingOn).toEqual([]);
+    expect(t.status).toBe("todo");
+
+    // the decision gets a new value: now the task is reviewed itself
+    board.record("s2", { key: "env/target-os", value: "macOS 14+", rationale: "Follow the users' OS" });
+    t = board.load().state.tasks.get("msi-installer")!;
+    expect(t.status).toBe("needs_review");
+    expect(t.needsReview).toEqual([{ key: "env/target-os", locked: 1, current: 2 }]);
   });
 
   it("a task needs review when a decision it is based on changes", () => {
@@ -271,7 +290,7 @@ describe("export", () => {
     expect(md).toContain(`### ${qid}`);
     expect(md.match(/^### sq-/gm)).toHaveLength(1);
     expect(md).toContain("### add-sync");
-    expect(md).toContain("- Status: needs_review (approach/sync-backend changed)");
+    expect(md).toContain("- Status: todo (waiting on review of approach/sync-backend)");
     expect(md).toContain(`(event ${board.store.readEvents().at(-1)!.id})`);
   });
 
@@ -381,6 +400,7 @@ describe("human actions in the web view", () => {
     const s = board.load().state.slots.get("approach/sync-backend")!;
     expect(s.stale).toEqual([]);
     expect(s.current!.tag).toBe("human-decided");
+    expect(s.versions).toHaveLength(1);
   });
 
   it("delete hides the slot from everything the AI sees; the key starts over cleanly", () => {
@@ -555,12 +575,13 @@ describe("task status and review", () => {
     expect(board.load().state.tasks.get("msi-installer")!.basedOn).toEqual([{ key: "env/target-os", n: 2 }]);
   });
 
-  it("a pass can't clear review while a decision it rests on has an unresolved premise", () => {
+  it("a task waiting on a decision's review can be verified, and keeps following that review", () => {
     seedWindowsWorld();
     board.task("s1", { slug: "msi-installer", title: "Build the MSI installer", basedOn: ["env/target-os"] });
     start("s2");
     board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "macOS" });
-    expect(board.verify("s2", { slug: "msi-installer", cmd: "true" })).toContain("still needs review: env/target-os has a changed premise");
+    expect(board.verify("s2", { slug: "msi-installer", cmd: "true" })).toContain("msi-installer is now verified. It still follows the review of env/target-os");
+    board.record("s2", { key: "env/target-os", value: "macOS 14+", rationale: "Follow the users' OS" });
     expect(board.load().state.tasks.get("msi-installer")!.status).toBe("needs_review");
   });
 
@@ -568,5 +589,324 @@ describe("task status and review", () => {
     verifiedMsi();
     board.task("s2", { slug: "msi-installer", status: "dropped", note: "Mac only now" });
     expect(board.load().state.tasks.get("msi-installer")!.status).toBe("dropped");
+  });
+});
+
+describe("review propagation", () => {
+  it("confirming a decision still holds keeps it the user's and stops the chain there", () => {
+    seedWindowsWorld();
+    board.record("s1", { key: "approach/installer", value: "MSI", rationale: "Windows installer", depends: ["env/target-os"] });
+    board.task("s1", { slug: "build-msi", title: "Build the MSI", basedOn: ["approach/installer"] });
+    start("s2");
+    board.record("s2", { key: "assum/user-os", value: "Mostly Windows, some Linux", rationale: "Survey", userQuote: "mostly Windows" });
+    // the user's decision is re-confirmed by the AI: still the user's, still v1
+    board.record("s2", { key: "approach/sync-backend", value: "OneDrive", rationale: "Linux users can use the web client" });
+    board.record("s2", { key: "env/target-os", value: "Windows 10+", rationale: "Linux is a small minority" });
+    const { state } = board.load();
+    const sync = state.slots.get("approach/sync-backend")!;
+    expect(sync.versions).toHaveLength(1);
+    expect(sync.current!.status).toBe("decided");
+    expect(sync.current!.tag).toBe("human-decided");
+    // nothing two steps away asks for anything
+    expect(state.slots.get("approach/installer")!.stale).toEqual([]);
+    expect(state.tasks.get("build-msi")!.status).toBe("todo");
+    expect(state.tasks.get("build-msi")!.waitingOn).toEqual([]);
+  });
+
+  it("a new version that keeps the value neither propagates nor changes who decided it", () => {
+    seedWindowsWorld();
+    board.task("s1", { slug: "add-sync", title: "Add sync", basedOn: ["approach/sync-backend"] });
+    // how re-confirming used to be written: the same value again, as a new AI version
+    board.store.append("slot.versioned", { kind: "agent", session: "s1" }, {
+      key: "approach/sync-backend", value: "OneDrive", rationale: "Still holds", depends: [{ key: "assum/user-os", n: 1 }], topics: [],
+    });
+    const { state } = board.load();
+    const sync = state.slots.get("approach/sync-backend")!;
+    expect(sync.current!.n).toBe(2);
+    expect(sync.current!.source).toBe("user");
+    expect(sync.current!.status).toBe("decided");
+    expect(state.tasks.get("add-sync")!.status).toBe("todo");
+  });
+
+  it("unaffected marks what a change doesn't touch in the same call, and only the rest needs review", () => {
+    seedWindowsWorld();
+    board.task("s1", { slug: "add-sync", title: "Add sync", basedOn: ["assum/user-os"] });
+    board.task("s1", { slug: "win-ci", title: "Windows CI", basedOn: ["assum/user-os"] });
+    start("s2");
+    expect(() => board.record("s2", {
+      key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "macOS",
+      unaffected: [{ key: "goal/nope", why: "x" }, { key: "add-sync", why: "" }],
+    })).toThrow(/goal\/nope isn't a live decision; add-sync: why is required/);
+    expect(board.load().state.slots.get("assum/user-os")!.versions).toHaveLength(1);
+
+    const msg = board.record("s2", {
+      key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "macOS",
+      unaffected: [{ key: "env/target-os", why: "We ship to enterprise Windows fleets anyway" }, { key: "add-sync", why: "Sync is OS-neutral" }],
+    });
+    expect(msg).toContain("Marked unaffected by assum/user-os: env/target-os, add-sync.");
+    expect(msg).toContain("These rest on it and now need review: approach/sync-backend, win-ci.");
+    const { state } = board.load();
+    expect(state.slots.get("env/target-os")!.stale).toEqual([]);
+    expect(state.slots.get("env/target-os")!.versions).toHaveLength(1);
+    expect(state.slots.get("approach/sync-backend")!.stale).toHaveLength(1);
+    expect(state.tasks.get("add-sync")!.status).toBe("todo");
+    expect(state.tasks.get("win-ci")!.status).toBe("needs_review");
+
+    // later, without a value: the same marking for what's left
+    expect(board.record("s2", { key: "assum/user-os", unaffected: [{ key: "win-ci", why: "CI covers every OS" }] })).toContain("Marked unaffected");
+    expect(board.load().state.tasks.get("win-ci")!.status).toBe("todo");
+    expect(() => board.record("s2", { key: "assum/user-os" })).toThrow(/value and rationale are required/);
+  });
+});
+
+describe("archive", () => {
+  it("archives tasks out of the brief, drops unfinished ones first, and lists decisions nothing uses any more", () => {
+    start("s1");
+    board.record("s1", { key: "goal/fast-sync", value: "Sync in under a second", rationale: "Users complain" });
+    board.record("s1", { key: "approach/delta-sync", value: "Send only changed blocks", rationale: "Less data", depends: ["goal/fast-sync"] });
+    board.record("s1", { key: "dep/rsync-lib", value: "librsync", rationale: "Block deltas", new: true });
+    board.task("s1", { slug: "delta-proto", title: "Prototype delta sync", basedOn: ["dep/rsync-lib", "approach/delta-sync"] });
+    board.task("s1", { slug: "old-ui", title: "Old UI", status: "in_progress" });
+    board.task("s1", { slug: "done-thing", title: "Done thing" });
+    board.verify("s1", { slug: "done-thing", cmd: "true" });
+
+    const dropped = board.task("s1", { slug: "delta-proto", status: "dropped", note: "Too slow" });
+    expect(dropped).toContain(`Nothing live uses these any more: approach/delta-sync "Send only changed blocks"; dep/rsync-lib "librsync"`);
+    expect(dropped).toContain('archive({ decisions: ["approach/delta-sync", "dep/rsync-lib"], note })');
+
+    const out = board.archive("s1", { tasks: ["delta-proto", "old-ui", "done-thing"], decisions: ["approach/delta-sync", "dep/rsync-lib"], note: "Delta sync abandoned" });
+    expect(out).toContain("Archived delta-proto (dropped).");
+    expect(out).toContain("Dropped old-ui (it was in_progress) and archived it.");
+    expect(out).toContain("Archived done-thing (verified).");
+    expect(out).toContain("Retired approach/delta-sync.");
+    const { state } = board.load();
+    expect(state.tasks.get("old-ui")!.status).toBe("dropped");
+    expect(state.tasks.get("done-thing")!).toMatchObject({ lifecycle: "archived", lifecycleNote: { note: "Delta sync abandoned" } });
+    expect(state.slots.get("dep/rsync-lib")!.current!.retired).toBe(true);
+    // goals stand on their own: losing their last user doesn't make them orphans
+    expect(out).not.toContain("goal/fast-sync");
+    expect(board.brief()).not.toContain("old-ui");
+    expect(board.brief("old ui")).toContain("old-ui");
+    expect(() => board.archive("s1", { tasks: ["old-ui"], note: "again" })).toThrow(/already archived/);
+  });
+
+  it("retiring a decision flags what rests on it and needs the user's words for their own goals", () => {
+    seedWindowsWorld();
+    board.task("s1", { slug: "add-sync", title: "Add sync", basedOn: ["approach/sync-backend"] });
+    expect(() => board.archive("s1", { decisions: ["approach/sync-backend"], note: "No sync" })).toThrow(/user's decision/);
+    board.record("s1", { key: "approach/onedrive-auth", value: "Microsoft login", rationale: "OneDrive needs it", depends: ["approach/sync-backend"] });
+    const out = board.archive("s1", { decisions: ["approach/sync-backend"], note: "No sync", userQuote: "drop sync" });
+    expect(out).toContain("approach/sync-backend was retired. What rests on it, and further down:");
+    expect(out).toContain('  - approach/onedrive-auth "Microsoft login"');
+    expect(out).toContain('  - task add-sync "Add sync"');
+    expect(board.load().state.tasks.get("add-sync")!.status).toBe("needs_review");
+  });
+});
+
+describe("task edits and handoff", () => {
+  it("changes a task's title, note and root cause in place", () => {
+    start("s1");
+    board.task("s1", { slug: "run-matrix", title: "Run the matrix, 48-72h each", note: "owner: A" });
+    expect(board.load().state.tasks.get("run-matrix")!.note).toBe("owner: A");
+    expect(board.task("s1", { slug: "run-matrix", title: "Run the matrix" })).toContain('title is now "Run the matrix"');
+    expect(board.task("s1", { slug: "run-matrix", note: "owner: B, after calibration" })).toContain("note saved");
+    board.task("s1", { slug: "run-matrix", rootCause: "Jobs were split by wall time" });
+    const t = board.load().state.tasks.get("run-matrix")!;
+    expect(t).toMatchObject({ title: "Run the matrix", note: "owner: B, after calibration", rootCause: "Jobs were split by wall time", status: "todo" });
+    const shown = board.task("s1", { slug: "run-matrix" });
+    expect(shown).toContain("# run-matrix [todo]");
+    expect(shown).toContain("Note: owner: B, after calibration");
+  });
+
+  it("a handoff is locked to the decisions it rests on and shows what changed before it was read", () => {
+    seedWindowsWorld();
+    board.record("s1", { key: "dep/onedrive-sdk", value: "OneDrive SDK 2", rationale: "Official", new: true });
+    board.task("s1", { slug: "add-sync", title: "Add sync", basedOn: ["approach/sync-backend"] });
+    expect(() => board.task("s1", { slug: "add-sync", handoff: "  " })).toThrow(/handoff is empty/);
+    const wrote = board.task("s1", { slug: "add-sync", handoff: "Upload works.\nNext: conflict handling in sync.ts.", handoffOn: ["dep/onedrive-sdk"] });
+    expect(wrote).toContain("against approach/sync-backend@1, dep/onedrive-sdk@1");
+    expect(board.brief()).toContain('add-sync [todo] Add sync · handoff: task({ slug: "add-sync" })');
+
+    start("s2");
+    board.record("s2", { key: "dep/onedrive-sdk", value: "Microsoft Graph SDK", rationale: "SDK 2 is deprecated" });
+    const shown = board.task("s2", { slug: "add-sync" });
+    expect(shown).toContain('- dep/onedrive-sdk: was "OneDrive SDK 2", now "Microsoft Graph SDK"');
+    expect(shown).toContain("Next: conflict handling in sync.ts.");
+    expect(shown).not.toContain("approach/sync-backend: was");
+    expect(board.brief()).toContain("handoff (dep/onedrive-sdk changed since)");
+
+    // a new handoff replaces the old one and is locked to the decisions as they are now
+    board.task("s2", { slug: "add-sync", handoff: "Switched to Graph; conflicts still open.", handoffOn: ["dep/onedrive-sdk"] });
+    const again = board.task("s2", { slug: "add-sync" });
+    expect(again).not.toContain("Changed since");
+    expect(again).not.toContain("Upload works.");
+    expect(board.export()).toContain("  > Switched to Graph; conflicts still open.");
+  });
+});
+
+describe("split", () => {
+  function seedA2() {
+    start("s1");
+    board.record("s1", { key: "env/cluster", value: "8xA100", rationale: "Lab cluster" });
+    board.record("s1", { key: "approach/a2-loss", value: "First token dominates; later positions weighted by rho; teacher is the base model", rationale: "Generalization fallback", depends: ["env/cluster"], userQuote: "first token + rho" });
+    board.record("s1", { key: "approach/aux-kl", value: "Aux KL on later positions", rationale: "Follows A2", depends: ["approach/a2-loss"], new: true });
+    board.record("s1", { key: "env/throughput", value: "2.1k tok/s per GPU", rationale: "Measured", depends: ["approach/a2-loss", "env/cluster"], new: true });
+    board.task("s1", { slug: "matrix-run", title: "Run the matrix", basedOn: ["approach/a2-loss"] });
+    board.task("s1", { slug: "teacher-cache", title: "Cache teacher logits", basedOn: ["approach/a2-loss"] });
+  }
+
+  it("splits several decisions at once and re-points each dependent only to the pieces it rests on", () => {
+    seedA2();
+    board.record("s1", { key: "assum/seq-len", value: "Sequences up to 4k", rationale: "Data stats", depends: ["approach/aux-kl"], new: true });
+    const out = board.split("s1", {
+      splits: [
+        { key: "approach/a2-loss", into: [
+          { key: "approach/a2-first-token", value: "First token dominates", rationale: "Core of A2" },
+          { key: "approach/a2-later-weight", value: "Later positions weighted by rho", rationale: "Generalization" },
+          { key: "approach/a2-teacher", value: "Teacher is the base model", rationale: "Simplest teacher" },
+        ] },
+        { key: "approach/aux-kl", into: [
+          { key: "approach/aux-kl-target", value: "Aux KL targets later positions", rationale: "Follows A2", depends: ["approach/a2-later-weight"] },
+          { key: "approach/aux-kl-weight", value: "Aux KL weight 0.1", rationale: "Small", depends: [] },
+        ] },
+      ],
+      dependents: [
+        { key: "env/throughput", on: ["approach/a2-teacher"] },
+        { key: "matrix-run", on: ["approach/a2-first-token", "approach/a2-later-weight"] },
+        { key: "assum/seq-len", on: ["approach/aux-kl-target"] },
+      ],
+      note: "Dependents rest on different parts",
+      userQuote: "split it",
+    });
+    expect(out).toContain("Split approach/a2-loss into approach/a2-first-token, approach/a2-later-weight, approach/a2-teacher.");
+    expect(out).toContain("env/throughput → approach/a2-teacher");
+    expect(out).toContain("Not listed in dependents, so these rest on every piece: teacher-cache.");
+
+    const { state } = board.load();
+    expect(state.slots.get("approach/a2-loss")!.current).toMatchObject({ retired: true, splitInto: ["approach/a2-first-token", "approach/a2-later-weight", "approach/a2-teacher"] });
+    const teacher = state.slots.get("approach/a2-teacher")!.current!;
+    expect(teacher).toMatchObject({ source: "user", status: "decided", splitFrom: "approach/a2-loss", depends: [{ key: "env/cluster", n: 1 }] });
+    expect(state.slots.get("approach/aux-kl-target")!.current!.depends).toEqual([{ key: "approach/a2-later-weight", n: 1 }]);
+    expect(state.slots.get("env/throughput")!.current!.depends).toEqual([{ key: "approach/a2-teacher", n: 1 }, { key: "env/cluster", n: 1 }]);
+    expect(state.slots.get("env/throughput")!.versions).toHaveLength(1);
+    expect(state.slots.get("assum/seq-len")!.current!.depends).toEqual([{ key: "approach/aux-kl-target", n: 1 }]);
+    expect(state.tasks.get("matrix-run")!.basedOn.map((d) => d.key)).toEqual(["approach/a2-first-token", "approach/a2-later-weight"]);
+    expect(state.tasks.get("teacher-cache")!.basedOn).toHaveLength(3);
+    // re-pointing asks nothing of anyone
+    for (const s of state.slots.values()) expect(s.stale).toEqual([]);
+    for (const t of state.tasks.values()) expect(t.status).toBe("todo");
+
+    // the point of it: changing one piece only touches what rests on that piece
+    const msg = board.record("s1", { key: "approach/a2-teacher", value: "Teacher is the SFT model", rationale: "Better targets", userQuote: "use SFT teacher" });
+    expect(msg).toContain("These rest on it and now need review: env/throughput, teacher-cache.");
+    expect(board.load().state.tasks.get("matrix-run")!.status).toBe("todo");
+  });
+
+  it("checks everything first, and makes pieces of the user's goal or approach proposals without their words", () => {
+    seedA2();
+    expect(() => board.split("s1", {
+      splits: [{ key: "approach/a2-loss", into: [{ key: "approach/aux-kl", value: "x", rationale: "y" }] }],
+      dependents: [{ key: "matrix-run", on: ["env/cluster"] }],
+      note: "n",
+    })).toThrow(/needs at least two pieces; approach\/aux-kl is already a live decision/);
+    expect(board.load().state.slots.get("approach/a2-loss")!.current!.retired).toBeUndefined();
+
+    board.split("s1", {
+      splits: [{ key: "approach/a2-loss", into: [
+        { key: "approach/a2-first-token", value: "First token dominates", rationale: "Core" },
+        { key: "approach/a2-rest", value: "Later positions weighted by rho, base-model teacher", rationale: "Rest" },
+      ] }],
+      note: "Finer",
+    });
+    const piece = board.load().state.slots.get("approach/a2-first-token")!.current!;
+    expect(piece.source).toBe("agent");
+    expect(piece.status).toBe("proposed");
+  });
+
+  it("suggests splitting when most of what rests on a decision isn't affected by its change", () => {
+    seedA2();
+    const msg = board.record("s1", {
+      key: "approach/a2-loss", value: "First token dominates; later positions weighted by rho; teacher is the SFT model", rationale: "Better targets", userQuote: "SFT teacher",
+      unaffected: [{ key: "approach/aux-kl", why: "Only the teacher changed" }, { key: "matrix-run", why: "Same matrix" }],
+    });
+    expect(msg).toContain("Consider splitting it");
+  });
+});
+
+describe("reader version", () => {
+  it("raises requires when newer kinds of events are written, and warns readers that are older", () => {
+    seedWindowsWorld();
+    const cfg = () => JSON.parse(readFileSync(join(root, ".project/config.json"), "utf8"));
+    expect(cfg().requires).toBeUndefined();
+    board.task("s1", { slug: "add-sync", title: "Add sync", note: "owner: A" });
+    expect(cfg()).toMatchObject({ requires: "0.2.0", acceptAfterSessions: 3 });
+    expect(board.brief()).not.toContain("need slotledger");
+    writeFileSync(join(root, ".project/config.json"), JSON.stringify({ ...cfg(), requires: "99.0.0" }));
+    board.task("s1", { slug: "add-sync", note: "owner: B" });
+    expect(cfg().requires).toBe("99.0.0");
+    expect(board.brief()).toContain("need slotledger 99.0.0 or later");
+  });
+});
+
+describe("removed premises", () => {
+  function seed() {
+    seedWindowsWorld();
+    board.record("s1", { key: "approach/msi", value: "Ship an MSI", rationale: "Windows installer", depends: ["env/target-os"] });
+    board.record("s1", { key: "dep/wix", value: "WiX toolset", rationale: "Builds the MSI", depends: ["approach/msi"] });
+    board.task("s1", { slug: "segment-resume", title: "Resume multi-day runs", basedOn: ["env/target-os"] });
+    board.task("s1", { slug: "sign-msi", title: "Sign the MSI", basedOn: ["approach/msi"] });
+  }
+
+  it("shows the whole chain on a deleted premise and won't let a re-confirmation quietly drop it", () => {
+    seed();
+    board.human({ action: "delete", key: "env/target-os" });
+    const brief = board.brief();
+    expect(brief).toContain("## Removed premises");
+    expect(brief).toContain("env/target-os was deleted. What rests on it, and further down:");
+    expect(brief).toContain('  - approach/msi "Ship an MSI"');
+    expect(brief).toContain('    - dep/wix "WiX toolset"');
+    expect(brief).toContain('    - task sign-msi "Sign the MSI"');
+    expect(brief).toContain('  - task segment-resume "Resume multi-day runs"');
+    expect(() => board.record("s1", { key: "approach/msi", value: "Ship an MSI", rationale: "Still fine" })).toThrow(/env\/target-os is gone, so re-confirming would quietly drop it/);
+
+    // the nudge asks once about the whole chain, not once per thing on it
+    start("s2");
+    const nudge = board.stop("s2", false).block ?? "";
+    expect(nudge.match(/env\/target-os was deleted/g)).toHaveLength(1);
+    expect(nudge).not.toContain("segment-resume needs review");
+  });
+
+  it("drops the dependency for what stands without it, and retires or suspends the rest", () => {
+    seed();
+    board.human({ action: "delete", key: "env/target-os" });
+    expect(board.record("s1", { key: "env/target-os", unaffected: [{ key: "approach/msi", why: "Enterprise customers still need an MSI" }] }))
+      .toContain("Dropped the dependency on env/target-os from: approach/msi.");
+    let { state } = board.load();
+    expect(state.slots.get("approach/msi")!.current!.depends).toEqual([]);
+    expect(state.slots.get("approach/msi")!.stale).toEqual([]);
+    expect(state.tasks.get("sign-msi")!.status).toBe("todo");
+
+    // the task only existed for the deleted environment: it goes, and with it the last of the chain
+    board.archive("s1", { tasks: ["segment-resume"], note: "Only made sense on that target" });
+    expect(board.brief()).not.toContain("## Removed premises");
+  });
+});
+
+describe("task lifecycle", () => {
+  it("suspends a task out of the list and reminders, and resumes it", () => {
+    seedWindowsWorld();
+    board.task("s1", { slug: "segment-resume", title: "Resume multi-day runs", basedOn: ["env/target-os"] });
+    expect(() => board.task("s1", { slug: "segment-resume", lifecycle: "suspended" })).toThrow(/needs a note/);
+    const suspended = board.task("s1", { slug: "segment-resume", lifecycle: "suspended", note: "3-day reservations finish in one go" });
+    expect(suspended).toContain("Suspended segment-resume");
+    expect(suspended).not.toContain("note saved");
+    expect(board.brief()).toContain("- Suspended: segment-resume");
+    expect(board.brief()).not.toContain("segment-resume [todo]");
+    start("s2");
+    board.record("s2", { key: "env/target-os", value: "macOS 14+", rationale: "Users moved" });
+    expect(board.stop("s2", false).block ?? "").not.toContain("segment-resume");
+    // still in use while on hold
+    expect(board.task("s2", { slug: "segment-resume", lifecycle: "live", note: "Reservations got shorter" })).toContain("segment-resume needs review: env/target-os v1→v2");
+    expect(board.brief()).toContain("segment-resume [needs_review]");
   });
 });

@@ -36,6 +36,10 @@ export interface Export {
     note?: string;
     verification: string;
     needsReview: SlotKey[];
+    waitingOn?: SlotKey[];
+    /** Why it's on hold */
+    suspended?: string;
+    handoff?: { text: string; writtenAt: string; changedSince: SlotKey[] };
   }[];
 }
 
@@ -66,7 +70,7 @@ export function buildExport(state: State, events: AnyEvent[], root: string): Exp
     }),
     questions: questionsForUser(state).map((q) => ({ id: q.qid, text: q.text, about: q.about, ...(q.options?.length ? { options: q.options } : {}), askedAt: q.at })),
     tasks: [...state.tasks.values()]
-      .filter((t) => t.status !== "dropped")
+      .filter((t) => t.lifecycle !== "archived" && t.status !== "dropped")
       .map((t) => ({
         slug: t.slug,
         title: t.title,
@@ -74,6 +78,9 @@ export function buildExport(state: State, events: AnyEvent[], root: string): Exp
         ...(t.note ? { note: t.note } : {}),
         verification: verificationLine(t),
         needsReview: t.needsReview.map((d) => d.key),
+        ...(t.waitingOn.length ? { waitingOn: t.waitingOn } : {}),
+        ...(t.lifecycle === "suspended" ? { suspended: t.lifecycleNote?.note ?? "" } : {}),
+        ...(t.handoff ? { handoff: { text: t.handoff.text, writtenAt: date(t.handoff.at), changedSince: t.handoff.changed.map((d) => d.key) } } : {}),
       })),
   };
 }
@@ -114,9 +121,14 @@ export function renderExportMd(x: Export): string {
   out.push("", "## Tasks");
   if (!x.tasks.length) out.push("", "(none)");
   for (const t of x.tasks) {
-    out.push("", `### ${t.slug}`, "", `- Title: ${one(t.title)}`, `- Status: ${t.status}${t.status === "needs_review" ? ` (${t.needsReview.join(", ")} changed)` : ""}`);
+    out.push("", `### ${t.slug}`, "", `- Title: ${one(t.title)}`, `- Status: ${t.status}${t.status === "needs_review" ? ` (${t.needsReview.join(", ")} changed)` : t.waitingOn?.length ? ` (waiting on review of ${t.waitingOn.join(", ")})` : ""}`);
     out.push(`- Verification: ${t.verification}`);
+    if (t.suspended !== undefined) out.push(`- Suspended: ${one(t.suspended)}`);
     if (t.note) out.push(`- Note: ${one(t.note)}`);
+    if (t.handoff) {
+      out.push(`- Handoff (written ${t.handoff.writtenAt}${t.handoff.changedSince.length ? `; changed since: ${t.handoff.changedSince.join(", ")}` : ""}):`, "");
+      out.push(...t.handoff.text.split("\n").map((l) => `  > ${l}`));
+    }
   }
   return out.join("\n") + "\n";
 }
