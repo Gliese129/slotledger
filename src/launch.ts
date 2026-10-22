@@ -21,7 +21,7 @@ export function launch(args: string[] = []): string[] {
   // since the bin's `#!/usr/bin/env node` fails when node isn't on PATH.
   const npm = process.env.npm_execpath ?? join(dirname(node), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
   const call = [shellQuote(node), `"$(command -v ${PKG.name})"`, ...args.map(shellQuote)].join(" ");
-  return [node, npm, "exec", "--yes", "--loglevel=error", `--package=${PKG.name}@${PKG.version}`, "--call", call];
+  return [node, npm, "exec", "--yes", "--loglevel=error", "--no-update-notifier", `--package=${PKG.name}@${PKG.version}`, "--call", call];
 }
 
 /** A command line for a person or the AI to run in their own shell */

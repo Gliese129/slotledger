@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { parse } from "smol-toml";
@@ -13,13 +13,18 @@ import { Store } from "../src/store.js";
 
 const cli = resolve("dist/cli.js");
 let root: string;
-const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CLAUDE") && !["SLOTLEDGER_ROOT", "SLOTLEDGER_CLIENT", "CODEX_THREAD_ID"].includes(key)));
+const env = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CLAUDE") && !["SLOTLEDGER_ROOT", "SLOTLEDGER_CLIENT", "CODEX_THREAD_ID"].includes(key))),
+  // A codex installed on this machine would change init's default
+  PATH: [dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
+};
 function write(path: string, text: string) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
   writeFileSync(join(root, path), text);
 }
-function run(...args: string[]) {
-  return execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: "utf8" });
+function run(...args: (string | Record<string, string>)[]) {
+  const extra = typeof args.at(-1) === "object" ? args.pop() as Record<string, string> : {};
+  return execFileSync(process.execPath, [cli, ...args as string[]], { cwd: root, env: { ...env, ...extra }, encoding: "utf8" });
 }
 function hook(event: string, input: object) {
   const output = execFileSync(process.execPath, [cli, "hook", event, "--client", "codex"], {
@@ -65,13 +70,31 @@ describe("Codex setup", () => {
     expect(existsSync(join(root, ".mcp.json"))).toBe(false);
   });
 
-  it("preserves the default Claude setup and supports both clients", () => {
-    run("init");
+  it("sets up Claude Code alone by default and supports both clients", () => {
+    const out = run("init");
+    expect(out).toContain("Clients: Claude Code (no sign of Codex");
     expect(existsSync(join(root, ".claude/settings.json"))).toBe(true);
     expect(existsSync(join(root, ".codex"))).toBe(false);
     run("init", "--client", "both");
     expect(existsSync(join(root, ".codex/hooks.json"))).toBe(true);
     expect(existsSync(join(root, ".mcp.json"))).toBe(true);
+  });
+
+  it("adds Codex without --client when the project or PATH points to it", () => {
+    write("AGENTS.md", "# Agents\n");
+    expect(run("init")).toContain("Clients: Claude Code and Codex (found AGENTS.md");
+    expect(existsSync(join(root, ".codex/hooks.json"))).toBe(true);
+    expect(existsSync(join(root, ".claude/settings.json"))).toBe(true);
+
+    rmSync(join(root, "AGENTS.md"));
+    rmSync(join(root, ".codex"), { recursive: true });
+    write("bin/codex", "#!/bin/sh\n");
+    expect(run("init", { PATH: join(root, "bin") + delimiter + env.PATH })).toContain("found codex on PATH");
+    expect(existsSync(join(root, ".codex/hooks.json"))).toBe(true);
+
+    rmSync(join(root, ".codex"), { recursive: true });
+    expect(run("init", "--client", "claude-code", { PATH: join(root, "bin") + delimiter + env.PATH })).toContain("Clients: Claude Code\n");
+    expect(existsSync(join(root, ".codex"))).toBe(false);
   });
 
   it("rejects invalid TOML and client names before installing", () => {

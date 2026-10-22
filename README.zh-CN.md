@@ -44,13 +44,13 @@ npx slotledger init --language 中文 --strictness balanced
 
 `init` 会把 MCP server 写进 `.mcp.json`，把 hooks 写进 `.claude/settings.json`，把 skill 装到 `.claude/skills/slotledger/SKILL.md`，并创建 `.project/config.json`。新开一个 Claude Code 会话就生效了。如果没带 `--language` 或 `--strictness`，AI 会在第一个会话里问你。
 
-Codex 用户加上 `--client codex`（`--client both` 可同时安装两个客户端）：
+如果项目里有 `.codex/` 或 `AGENTS.md`，或者 PATH 里能找到 `codex` 命令，`init` 会同时接入 Codex，输出里会写明装了哪些客户端、依据是什么。想自己指定，就加 `--client claude-code`、`--client codex` 或 `--client both`：
 
 ```bash
 npx slotledger init --client codex --language 中文 --strictness balanced
 ```
 
-它会把 MCP 配置合并进 `.codex/config.toml`，把四个生命周期 hooks 写入 `.codex/hooks.json`，并安装 skill 到 `.agents/skills/slotledger/SKILL.md`。已有的服务设置和其他 hooks 会保留，TOML 的排版和注释会重新生成。在 Codex 中信任项目、审阅并信任 hooks，然后新开会话。参见官方 [MCP 配置](https://developers.openai.com/codex/mcp)和 [hooks 说明](https://learn.chatgpt.com/docs/hooks)。
+对 Codex，`init` 会把 MCP 配置合并进 `.codex/config.toml`，把四个生命周期 hooks 写入 `.codex/hooks.json`，并安装 skill 到 `.agents/skills/slotledger/SKILL.md`。已有的服务设置和其他 hooks 会保留，TOML 的排版和注释会重新生成。在 Codex 中信任项目、审阅并信任 hooks，然后新开会话。参见官方 [MCP 配置](https://developers.openai.com/codex/mcp)和 [hooks 说明](https://learn.chatgpt.com/docs/hooks)。
 
 通过 npx 运行时，`init` 会锁定当时的版本：hooks 和 MCP server 通过 `npm exec` 启动 `slotledger@<该版本>`，清掉 npx 缓存也不会失效，之后第一次启动会重新下载。升级时重新运行 `npx slotledger@latest init`。如果是全局安装（`npm i -g slotledger`）或从源码构建，`init` 会直接指向那一份。
 

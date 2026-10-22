@@ -44,13 +44,13 @@ npx slotledger init --language English --strictness balanced
 
 `init` writes the MCP server to `.mcp.json`, the hooks to `.claude/settings.json`, the skill to `.claude/skills/slotledger/SKILL.md`, and creates `.project/config.json`. Start a new Claude Code session and it's live. If you leave out `--language` or `--strictness`, the AI asks you in the first session.
 
-For Codex, add `--client codex` (or `--client both` for both clients):
+`init` also sets up Codex when the project has `.codex/` or `AGENTS.md`, or `codex` is on your PATH; its output says which clients it chose and why. To choose yourself, pass `--client claude-code`, `--client codex`, or `--client both`:
 
 ```bash
 npx slotledger init --client codex --language English --strictness balanced
 ```
 
-This merges the MCP server into `.codex/config.toml`, installs the four lifecycle hooks in `.codex/hooks.json`, and copies the skill to `.agents/skills/slotledger/SKILL.md`. Existing server settings and unrelated hooks are preserved; TOML formatting and comments are rewritten. Trust the project and review/trust the hooks in Codex, then start a new session. See [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks).
+For Codex, `init` merges the MCP server into `.codex/config.toml`, installs the four lifecycle hooks in `.codex/hooks.json`, and copies the skill to `.agents/skills/slotledger/SKILL.md`. Existing server settings and unrelated hooks are preserved; TOML formatting and comments are rewritten. Trust the project and review/trust the hooks in Codex, then start a new session. See [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks).
 
 When run through npx, `init` pins the version it was run with: hooks and the MCP server start `slotledger@<that version>` through `npm exec`, so clearing npx's cache doesn't break them, and the first start after that downloads it again. To upgrade, run `npx slotledger@latest init` again. Installed globally (`npm i -g slotledger`) or built from source, `init` points at that copy instead.
 

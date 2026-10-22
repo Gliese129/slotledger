@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { Board } from "./board.js";
 import { codexConfig, installCodex, installSkill } from "./codex.js";
 import { EXPORT_FORMATS, type ExportFormat } from "./export.js";
@@ -91,11 +91,20 @@ function flags(args: string[]): { positional: string[]; get: (name: string) => s
   return { positional, get: (name) => named.get(name) };
 }
 
-function clientFrom(f: ReturnType<typeof flags>, allowBoth = false): string {
-  const client = f.get("--client") ?? "claude-code";
+function clientFrom(f: ReturnType<typeof flags>, allowBoth = false): string | undefined {
+  const client = f.get("--client");
   const allowed = allowBoth ? ["claude-code", "codex", "both"] : ["claude-code", "codex"];
-  if (!allowed.includes(client)) throw new Error(`--client must be one of: ${allowed.join(", ")}`);
+  if (client !== undefined && !allowed.includes(client)) throw new Error(`--client must be one of: ${allowed.join(", ")}`);
   return client;
+}
+
+/** What suggests this project or machine uses Codex, if anything */
+function codexSign(root: string): string | undefined {
+  if (existsSync(join(root, ".codex"))) return ".codex/";
+  if (existsSync(join(root, "AGENTS.md"))) return "AGENTS.md";
+  const exts = process.platform === "win32" ? [".cmd", ".exe", ""] : [""];
+  const onPath = (process.env.PATH ?? "").split(delimiter).some((dir) => dir && exts.some((ext) => existsSync(join(dir, "codex" + ext))));
+  return onPath ? "codex on PATH" : undefined;
 }
 
 function settingsFrom(f: ReturnType<typeof flags>): SettingsInput {
@@ -119,8 +128,13 @@ function settingsSummary(config: Config): string {
   ].join("\n");
 }
 
-function init(target: string, settings: SettingsInput, client: string): void {
+function init(target: string, settings: SettingsInput, chosen: string | undefined): void {
   const root = resolveRoot(resolve(target));
+  // Without --client, also set up Codex when anything points to it: a missing setup records nothing, an extra one costs little
+  const sign = chosen ? undefined : codexSign(root);
+  const client = chosen ?? (sign ? "both" : "claude-code");
+  const clients = { "claude-code": "Claude Code", codex: "Codex", both: "Claude Code and Codex" }[client];
+  const why = chosen ? "" : sign ? ` (found ${sign}; pass --client to choose)` : " (no sign of Codex; add it with --client both)";
   const [command, ...args] = launch();
   const cmd = (sub: string, agent: string) => launch(["hook", sub, "--client", agent]).map(shellQuote).join(" ");
   // Ours: hook commands and servers this or an earlier install wrote, including from before the rename
@@ -169,6 +183,7 @@ function init(target: string, settings: SettingsInput, client: string): void {
   }
 
   console.log(`slotledger is set up in ${root}
+- Clients: ${clients}${why}
 - .project/config.json: define topics and their paths for more accurate undeclared-change checks
 ${client !== "codex" ? "- .mcp.json, .claude/settings.json: the Claude Code MCP server and hooks\n- .claude/skills/slotledger/SKILL.md: installed the skill\n" : ""}${codex !== undefined ? "- .codex/config.toml, .codex/hooks.json: the Codex MCP server and hooks\n- .agents/skills/slotledger/SKILL.md: installed the shared skill\n- Trust this project and review/trust its hooks in Codex, then start a new session\n- Without hooks, call brief before edits and checkpoint before finishing each turn\n" : ""}\
 - Run \`slotledger web\` to view the project state in a browser
@@ -179,7 +194,7 @@ const [sub, arg] = process.argv.slice(2);
 if (!sub || sub === "serve") {
   await startServer();
 } else if (sub === "hook") {
-  await hook(arg, clientFrom(flags(process.argv.slice(4))));
+  await hook(arg, clientFrom(flags(process.argv.slice(4))) ?? "claude-code");
 } else if (sub === "init") {
   const f = flags(process.argv.slice(3));
   init(f.positional[0] ?? process.cwd(), settingsFrom(f), clientFrom(f, true));
