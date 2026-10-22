@@ -69,6 +69,8 @@ export interface TaskState {
   /** Decisions in basedOn waiting for their own premise review; the task follows whatever that review decides */
   waitingOn: SlotKey[];
   lifecycle: TaskLifecycle;
+  /** When anything about the task last changed */
+  updatedAt: string;
   /** Why it was last suspended, archived or resumed */
   lifecycleNote?: { at: string; note: string };
   /** changed: decisions it was written against whose value has changed since */
@@ -217,7 +219,7 @@ export function fold(events: AnyEvent[], config: Config): State {
       case "task.created": {
         const d = ev.data;
         if (!tasks.has(d.slug)) {
-          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", progress: "todo", session: sid, needsReview: [], waitingOn: [], lifecycle: "live" });
+          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", progress: "todo", session: sid, needsReview: [], waitingOn: [], lifecycle: "live", updatedAt: ev.at });
         }
         break;
       }
@@ -272,6 +274,10 @@ export function fold(events: AnyEvent[], config: Config): State {
       case "question.answered":
         answered.add(ev.data.qid);
         break;
+    }
+    if (ev.type.startsWith("task.")) {
+      const t = tasks.get((ev.data as { slug: string }).slug);
+      if (t) t.updatedAt = ev.at;
     }
   }
 

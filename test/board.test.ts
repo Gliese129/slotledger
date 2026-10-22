@@ -728,6 +728,15 @@ describe("archive", () => {
 });
 
 describe("task edits and handoff", () => {
+  it("tracks when anything about a task last changed", async () => {
+    start("s1");
+    board.task("s1", { slug: "a", title: "A" });
+    const created = board.load().state.tasks.get("a")!.updatedAt;
+    await new Promise((r) => setTimeout(r, 5));
+    board.task("s1", { slug: "a", note: "owner: B" });
+    expect(board.load().state.tasks.get("a")!.updatedAt > created).toBe(true);
+  });
+
   it("changes a task's title, note and root cause in place", () => {
     start("s1");
     board.task("s1", { slug: "run-matrix", title: "Run the matrix, 48-72h each", note: "owner: A" });

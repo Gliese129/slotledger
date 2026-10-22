@@ -253,13 +253,17 @@ const open = (type, id) => new Raw(`data-open="${esc(type + ":" + id)}"`);
 const actor = (a) => (!a ? "" : a.kind === "human" ? (a.channel === "web" ? "you, in the web view" : "you") : a.kind === "agent" ? "AI" : "slotledger");
 
 // ---------- derived ----------
+// Every list shows what changed most recently first
+const slotTime = (s) => [s.current?.at, ...(s.current?.reviews ?? []).map((r) => r.at), s.deleted?.at].filter(Boolean).sort().at(-1) ?? "";
+const newest = (time) => (a, b) => (time(b) > time(a) ? 1 : time(b) < time(a) ? -1 : 0);
+const bySlot = newest(slotTime), byTask = newest((t) => t.updatedAt ?? ""), byQuestion = newest((q) => q.at);
 function derive() {
-  const userQs = data.questions.filter((q) => q.status === "open" && q.forUser);
-  const proposed = data.slots.filter((s) => live(s) && s.current.status === "proposed" && ASKS.includes(s.category));
+  const userQs = data.questions.filter((q) => q.status === "open" && q.forUser).sort(byQuestion);
+  const proposed = data.slots.filter((s) => live(s) && s.current.status === "proposed" && ASKS.includes(s.category)).sort(bySlot);
   // stale ones already covered by a question for the user are not listed twice
   const asked = new Set(userQs.flatMap((q) => (q.origin === "stale_premise" ? [q.about[0]] : [])));
-  const stale = data.slots.filter((s) => live(s) && s.stale.length && !asked.has(s.key));
-  const openTasks = data.tasks.filter((t) => t.lifecycle === "live" && t.status !== "verified" && t.status !== "dropped");
+  const stale = data.slots.filter((s) => live(s) && s.stale.length && !asked.has(s.key)).sort(bySlot);
+  const openTasks = data.tasks.filter((t) => t.lifecycle === "live" && t.status !== "verified" && t.status !== "dropped").sort(byTask);
   const review = openTasks.filter((t) => t.status === "needs_review");
   const starts = data.sessions.map((s) => ({ id: s.id, at: s.start.at }));
   const sessionsSince = (v) => new Set(starts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id)).size;
@@ -280,7 +284,7 @@ function taskRow(t) {
   return h`<div class="row ${t.status === "dropped" || t.lifecycle !== "live" ? "dim" : ""} ${isSel("task", t.slug) ? "sel" : ""}" ${open("task", t.slug)}>
     <span class="dot ${t.status}" title="${TASK[t.status]}"></span>
     <span class="main"><span class="t">${t.title}</span><span class="k">${t.slug}</span></span>
-    <span class="side">${failed && t.status !== "verified" ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "needs_review" ? h`<span class="flag bad">needs review</span>` : t.status === "verified" ? h`<span class="flag ok">verified</span>` : t.waitingOn?.length ? h`<span class="flag warn">waiting on review</span>` : ""}</span>
+    <span class="side">${failed && t.status !== "verified" ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "needs_review" ? h`<span class="flag bad">needs review</span>` : t.status === "verified" ? h`<span class="flag ok">verified</span>` : t.waitingOn?.length ? h`<span class="flag warn">waiting on review</span>` : ""}${t.updatedAt ? when(t.updatedAt) : ""}</span>
   </div>`;
 }
 function questionRow(q) {
@@ -336,7 +340,7 @@ function decisions() {
   const pool = data.slots.filter((s) => !s.deleted && (ui.showOld || live(s)));
   const count = (c) => pool.filter((s) => c === "all" || s.category === c).length;
   const rows = pool.filter((s) => (ui.cat === "all" || s.category === ui.cat) && match(s.key, shown(s).value, shown(s).rationale, s.topics));
-  const groups = CATS.map((c) => [c, rows.filter((s) => s.category === c).sort((a, b) => a.key.localeCompare(b.key))]).filter(([, l]) => l.length);
+  const groups = CATS.map((c) => [c, rows.filter((s) => s.category === c).sort(bySlot)]).filter(([, l]) => l.length);
   return h`
     <h1 class="page-title">Decisions</h1>
     <p class="page-sub">What the project has settled on. Click one for its reasons, dependencies and history.</p>
@@ -358,7 +362,7 @@ function tasks() {
     <h1 class="page-title">Tasks</h1>
     <p class="page-sub">Work only counts as verified with evidence: a command slotledger ran, a referenced report or record, or a person's acceptance. Each shows its source.</p>
     ${order.map((st) => {
-      const l = ts.filter((t) => group(t) === st);
+      const l = ts.filter((t) => group(t) === st).sort(byTask);
       if (!l.length) return "";
       // dropped and archived start collapsed, so for them the stored key means "opened"
       const folded = st === "dropped" || st === "archived";
