@@ -6,7 +6,7 @@ import type { Actor, AnyEvent, Config, EventDataMap, EventType } from "./types.j
 
 // CC sets CLAUDE_PROJECT_DIR for both hooks and the MCP server; the server's cwd isn't guaranteed to be the project
 export function resolveRoot(cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()): string {
-  if (process.env.SLOTBOARD_ROOT) return process.env.SLOTBOARD_ROOT;
+  if (process.env.SLOTLEDGER_ROOT) return process.env.SLOTLEDGER_ROOT;
   try {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {

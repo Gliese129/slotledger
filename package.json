@@ -1,15 +1,15 @@
 {
-  "name": "slotboard",
-  "version": "0.0.1",
+  "name": "slotledger",
+  "version": "0.1.0",
   "description": "Project-state MCP server for Claude Code / Codex: every AI decision visible, traceable, revocable.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Gliese129/slotboard.git"
+    "url": "git+https://github.com/Gliese129/slotledger.git"
   },
-  "homepage": "https://github.com/Gliese129/slotboard#readme",
+  "homepage": "https://github.com/Gliese129/slotledger#readme",
   "type": "module",
   "bin": {
-    "slotboard": "dist/cli.js"
+    "slotledger": "dist/cli.js"
   },
   "files": [
     "dist",

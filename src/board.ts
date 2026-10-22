@@ -45,7 +45,7 @@ export interface TaskInput {
 
 export interface VerifyInput {
   slug: string;
-  /** run: a command slotboard runs; exit 0 passes */
+  /** run: a command slotledger runs; exit 0 passes */
   cmd?: string;
   timeoutSec?: number;
   /** ref: paths, URLs, or IDs of evidence produced elsewhere */
@@ -249,7 +249,7 @@ export class Board {
   task(session: string, input: TaskInput): string {
     if (!SLUG.test(input.slug)) throw new FixableError(`Slugs use lowercase letters, digits, and dashes, e.g. migrate-platform-to-macos; got ${input.slug}.`);
     if (input.status === "verified") throw new FixableError(`Only verify can set verified: verify({ slug: "${input.slug}", cmd: "<test command>" }).`);
-    if (input.status === "needs_review") throw new FixableError("needs_review is set by slotboard when decisions a task rests on change; it can't be set directly.");
+    if (input.status === "needs_review") throw new FixableError("needs_review is set by slotledger when decisions a task rests on change; it can't be set directly.");
     const actor: Actor = { kind: "agent", session };
     const { state } = this.load();
     const out: string[] = [];
@@ -305,13 +305,13 @@ export class Board {
 
   // ---------- verify ----------
 
-  /** Attach evidence to a task: a command slotboard runs (run), evidence produced elsewhere (ref), or a person's acceptance (human) */
+  /** Attach evidence to a task: a command slotledger runs (run), evidence produced elsewhere (ref), or a person's acceptance (human) */
   verify(session: string, input: VerifyInput): string {
     const { slug } = input;
     const { state } = this.load();
     if (!state.tasks.has(slug)) throw new FixableError(`Task ${slug} doesn't exist. Create it with task first.`);
     const sources = [input.cmd !== undefined, !!input.refs?.length, input.userQuote !== undefined].filter(Boolean).length;
-    if (sources !== 1) throw new FixableError("Give exactly one kind of evidence: cmd (slotboard runs it), refs + summary (evidence produced elsewhere), or userQuote (a person's acceptance).");
+    if (sources !== 1) throw new FixableError("Give exactly one kind of evidence: cmd (slotledger runs it), refs + summary (evidence produced elsewhere), or userQuote (a person's acceptance).");
     if (input.cmd !== undefined) return this.run(session, state, slug, input.cmd, input.timeoutSec);
     if (input.passed === undefined) throw new FixableError("Say whether it passed: passed: true or false.");
 
@@ -323,7 +323,7 @@ export class Board {
       this.writeStatus();
       const missing = refs.filter((r) => r.missing).map((r) => r.target);
       return [
-        input.passed ? `Recorded reference evidence for ${slug} (by reference: the pass is your report, not a run slotboard did). ${this.statusAfter(slug)}` : `Recorded failing reference evidence for ${slug}. Task status unchanged.`,
+        input.passed ? `Recorded reference evidence for ${slug} (by reference: the pass is your report, not a run slotledger did). ${this.statusAfter(slug)}` : `Recorded failing reference evidence for ${slug}. Task status unchanged.`,
         ...refs.filter((r) => r.sha256).map((r) => `${r.target}: sha256 ${r.sha256!.slice(0, 12)}…`),
         ...(missing.length ? [`Not found in the project: ${missing.join(", ")}. If these are local files, fix the paths and record again; if they live elsewhere, that's fine.`] : []),
       ].join("\n");
@@ -621,7 +621,7 @@ export class Board {
         : `${i.no} = decision made on the user's behalf, ${i.key} v${i.n}: ${i.text}`,
     );
     return [
-      "The user may be replying to the last slotboard report. The numbers mean:",
+      "The user may be replying to the last slotledger report. The numbers mean:",
       ...lines,
       "Answer a question with respond({ item, choice or text, userQuote }); withdraw a decision with respond({ item, withdraw: true, text?: replacement, userQuote }). userQuote is the user's exact words.",
     ].join("\n");

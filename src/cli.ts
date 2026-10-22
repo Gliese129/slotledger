@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Board } from "./board.js";
-import { codexConfig, installCodex } from "./codex.js";
+import { codexConfig, installCodex, installSkill } from "./codex.js";
 import { EXPORT_FORMATS, type ExportFormat } from "./export.js";
+import { CLI, launch, shellQuote } from "./launch.js";
 import { startServer } from "./server.js";
 import { linkSession } from "./session.js";
 import { STRICTNESS_GUIDE, configCommand, isConfigured, validateSettings, writeSettings, type SettingsInput } from "./settings.js";
@@ -98,10 +98,6 @@ function clientFrom(f: ReturnType<typeof flags>, allowBoth = false): string {
   return client;
 }
 
-function shellQuote(value: string): string {
-  return process.platform === "win32" ? JSON.stringify(value) : "'" + value.replace(/'/g, "'\\''") + "'";
-}
-
 function settingsFrom(f: ReturnType<typeof flags>): SettingsInput {
   const input = { language: f.get("--language"), strictness: f.get("--strictness") };
   const err = validateSettings(input);
@@ -125,12 +121,12 @@ function settingsSummary(config: Config): string {
 
 function init(target: string, settings: SettingsInput, client: string): void {
   const root = resolveRoot(resolve(target));
-  const self = fileURLToPath(import.meta.url);
-  // Use node by absolute path: hooks and the MCP server may not have node on PATH (e.g. nvm only applies in interactive shells)
-  const node = process.execPath;
-  const cmd = (sub: string, agent: string) => `${shellQuote(node)} ${shellQuote(self)} hook ${sub} --client ${agent}`;
+  const [command, ...args] = launch();
+  const cmd = (sub: string, agent: string) => launch(["hook", sub, "--client", agent]).map(shellQuote).join(" ");
+  // Ours: hook commands and servers this or an earlier install wrote, including from before the rename
+  const ours = (text: string) => text.includes(CLI) || /slot(ledger|board)\b/.test(text);
   // Parse existing TOML before writing any files so invalid config leaves setup untouched.
-  const codex = client !== "claude-code" ? codexConfig(root, node, self) : undefined;
+  const codex = client !== "claude-code" ? codexConfig(root, command, args) : undefined;
 
   mkdirSync(join(root, ".project"), { recursive: true });
   const cfg = join(root, ".project", "config.json");
@@ -139,30 +135,32 @@ function init(target: string, settings: SettingsInput, client: string): void {
   appendLine(join(root, ".gitattributes"), ".project/events.jsonl merge=union");
   appendLine(join(root, ".gitignore"), ".project/run/");
 
-  if (client !== "codex") mergeJson(join(root, ".mcp.json"), (c) => ({
-    ...c,
-    mcpServers: { ...(c.mcpServers ?? {}), slotboard: { command: node, args: [self], env: { SLOTBOARD_ROOT: root, SLOTBOARD_CLIENT: "claude-code" } } },
-  }));
+  if (client !== "codex") mergeJson(join(root, ".mcp.json"), (c) => {
+    const { slotboard: _, ...servers } = c.mcpServers ?? {};
+    return { ...c, mcpServers: { ...servers, slotledger: { command, args, env: { SLOTLEDGER_ROOT: root, SLOTLEDGER_CLIENT: "claude-code" } } } };
+  });
 
   const hooks: Record<string, string> = { SessionStart: "session-start", UserPromptSubmit: "prompt", Stop: "stop", SessionEnd: "session-end" };
   if (client !== "codex") mergeJson(join(root, ".claude", "settings.json"), (c) => {
     const h = { ...(c.hooks ?? {}) };
     for (const [ev, sub] of Object.entries(hooks)) {
-      const kept = (h[ev] ?? []).filter((g: any) => !JSON.stringify(g).includes("slotboard") && !JSON.stringify(g).includes(self));
+      const kept = (h[ev] ?? []).filter((g: any) => !ours(JSON.stringify(g)));
       h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(sub, "claude-code"), timeout: 30 }] }];
     }
-    const allow = new Set([...(c.permissions?.allow ?? []), "mcp__slotboard__brief"]);
-    return { ...c, hooks: h, enabledMcpjsonServers: [...new Set([...(c.enabledMcpjsonServers ?? []), "slotboard"])], permissions: { ...(c.permissions ?? {}), allow: [...allow] } };
+    const allow = new Set([...(c.permissions?.allow ?? []).filter((p: string) => p !== "mcp__slotboard__brief"), "mcp__slotledger__brief"]);
+    const enabled = new Set([...(c.enabledMcpjsonServers ?? []).filter((s: string) => s !== "slotboard"), "slotledger"]);
+    return { ...c, hooks: h, enabledMcpjsonServers: [...enabled], permissions: { ...(c.permissions ?? {}), allow: [...allow] } };
   });
+  if (client !== "codex") installSkill(join(root, ".claude", "skills", "slotledger"));
 
   if (codex !== undefined) {
-    installCodex(root, codex, self);
+    installCodex(root, codex);
     mergeJson(join(root, ".codex", "hooks.json"), (c) => {
       const h = { ...(c.hooks ?? {}) };
       for (const [ev, sub] of Object.entries(hooks)) {
         const kept = (h[ev] ?? []).map((group: any) => ({
           ...group,
-          hooks: (group.hooks ?? []).filter((handler: any) => !handler.command?.includes(self) && !/slotboard.*\bhook\b/.test(handler.command ?? "")),
+          hooks: (group.hooks ?? []).filter((handler: any) => !(ours(handler.command ?? "") && /\bhook\b/.test(handler.command ?? ""))),
         })).filter((group: any) => group.hooks.length);
         h[ev] = [...kept, { hooks: [{ type: "command", command: cmd(sub, "codex"), timeout: ev === "SessionEnd" ? 3 : 30 }] }];
       }
@@ -170,10 +168,10 @@ function init(target: string, settings: SettingsInput, client: string): void {
     });
   }
 
-  console.log(`slotboard is set up in ${root}
+  console.log(`slotledger is set up in ${root}
 - .project/config.json: define topics and their paths for more accurate undeclared-change checks
-${client !== "codex" ? "- .mcp.json, .claude/settings.json: the Claude Code MCP server and hooks\n- Consider copying skill/SKILL.md to .claude/skills/slotboard/\n" : ""}${codex !== undefined ? "- .codex/config.toml, .codex/hooks.json: the Codex MCP server and hooks\n- .agents/skills/slotboard/SKILL.md: installed the shared skill\n- Trust this project and review/trust its hooks in Codex, then start a new session\n- Without hooks, call brief before edits and checkpoint before finishing each turn\n" : ""}\
-- Run \`slotboard web\` to view the project state in a browser
+${client !== "codex" ? "- .mcp.json, .claude/settings.json: the Claude Code MCP server and hooks\n- .claude/skills/slotledger/SKILL.md: installed the skill\n" : ""}${codex !== undefined ? "- .codex/config.toml, .codex/hooks.json: the Codex MCP server and hooks\n- .agents/skills/slotledger/SKILL.md: installed the shared skill\n- Trust this project and review/trust its hooks in Codex, then start a new session\n- Without hooks, call brief before edits and checkpoint before finishing each turn\n" : ""}\
+- Run \`slotledger web\` to view the project state in a browser
 ${settingsSummary(config)}`);
 }
 
@@ -208,9 +206,9 @@ if (!sub || sub === "serve") {
   const port = flag("--port");
   const board = new Board(new Store(resolveRoot()));
   const { url } = await startWeb(board, { port: port ? Number(port) : undefined, host: flag("--host") });
-  console.log(`slotboard web: ${url}  (read-only; Ctrl+C to stop)`);
+  console.log(`slotledger web: ${url}  (read-only; Ctrl+C to stop)`);
   if (args.includes("--open")) openBrowser(url);
 } else {
-  console.error("Usage: slotboard [serve] | init [dir] [--client claude-code|codex|both] [--language L] [--strictness strict|balanced|loose] | config [--language L] [--strictness S] | status | export [--format markdown|json] | web [--port N] [--open] | hook <session-start|prompt|stop|session-end> [--client claude-code|codex]");
+  console.error("Usage: slotledger [serve] | init [dir] [--client claude-code|codex|both] [--language L] [--strictness strict|balanced|loose] | config [--language L] [--strictness S] | status | export [--format markdown|json] | web [--port N] [--open] | hook <session-start|prompt|stop|session-end> [--client claude-code|codex]");
   process.exit(1);
 }

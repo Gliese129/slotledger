@@ -1,17 +1,17 @@
 ---
-name: slotboard
-description: When the project has the slotboard MCP (record/task/verify/ask/respond/brief tools), use it to record decisions, plans, and tasks instead of writing PLAN/TODO/handoff documents. Use it when making a decision, changing an approach, noticing a premise has changed, starting or finishing work, or when the user replies to report numbers.
+name: slotledger
+description: When the project has the slotledger MCP (record/task/verify/ask/respond/brief tools), use it to record decisions, plans, and tasks instead of writing PLAN/TODO/handoff documents. Use it when making a decision, changing an approach, noticing a premise has changed, starting or finishing work, or when the user replies to report numbers.
 ---
 
-# Recording project state with slotboard
+# Recording project state with slotledger
 
-slotboard stores decisions as versioned slots. Each decision states its rationale and premises; when a premise changes, the decisions that depend on it are flagged automatically. It won't block you; just follow the steps below.
+slotledger stores decisions as versioned slots. Each decision states its rationale and premises; when a premise changes, the decisions that depend on it are flagged automatically. It won't block you; just follow the steps below.
 
 ## Setting up
 
-Before installing slotboard into a project (or when brief says the settings aren't set), ask the user two things, then pass the answers to `slotboard init` or `slotboard config` (brief prints the exact command):
+Before installing slotledger into a project (or when brief says the settings aren't set), ask the user two things, then pass the answers to `slotledger init` or `slotledger config` (brief prints the exact command):
 
-1. **Language**: which language decisions, rationales, task titles and questions should be written in. slotboard's own messages stay in English.
+1. **Language**: which language decisions, rationales, task titles and questions should be written in. slotledger's own messages stay in English.
 2. **Strictness**:
    - strict: record every goal, approach, env and assum decision; tasks count as done only after verify.
    - balanced (default): record goal, approach and env decisions and the assumptions they rest on.
@@ -19,7 +19,7 @@ Before installing slotboard into a project (or when brief says the settings aren
 
 Follow the language and strictness that brief shows for the project.
 
-For Codex, install with `slotboard init --client codex` (or `--client both` for Codex and Claude Code). This writes project-local MCP and hooks config and installs this skill under `.agents/skills/slotboard/`. Codex must trust the project and its hook definitions before the hooks run.
+For Codex, install with `slotledger init --client codex` (or `--client both` for Codex and Claude Code). This writes project-local MCP and hooks config and installs this skill under `.agents/skills/slotledger/`. Codex must trust the project and its hook definitions before the hooks run.
 
 Call `brief` before editing when hooks are unavailable; this establishes the session's git baseline. When the user replies with a report number, pass their reply as `brief({ prompt: "1A" })` to read the numbered items before calling `respond`.
 
@@ -57,13 +57,13 @@ Don't stop, and don't quietly switch approaches in the code.
 ## Tasks
 
 - `task` tracks work by slug. Each task has exactly one status: todo, in_progress, implemented, needs_review, verified, dropped. Set in_progress when you start, implemented when the work is done, dropped if it's abandoned.
-- needs_review is set by slotboard when a decision in the task's basedOn changes, even if the task was verified; the old pass stays in its history. Pick one way out:
+- needs_review is set by slotledger when a decision in the task's basedOn changes, even if the task was verified; the old pass stays in its history. Pick one way out:
   - **re-verify** with `verify`: a pass re-locks basedOn to the current decisions;
   - **confirm it still holds**: `task({ slug, basedOn: [keys], note: "why it still holds" })` re-locks basedOn and returns the task to its earlier status;
   - **drop it** with status dropped.
   If a decision it rests on has a changed premise of its own, settle that decision first.
 - Done means `verify`, with one of three kinds of evidence. Each is shown with its source, so be honest about which one you have:
-  - **run** (`cmd`): slotboard runs the command and keeps the exit code and output. Use it whenever a command can check the work, including scripts that check a report's metrics.
+  - **run** (`cmd`): slotledger runs the command and keeps the exit code and output. Use it whenever a command can check the work, including scripts that check a report's metrics.
   - **ref** (`refs`, `summary`, `passed`): the evidence was produced elsewhere, e.g. an evaluation report, a run receipt, a job on a cluster scheduler, a URL. Local files get hashed so the evidence names the exact version; add key numbers in `metrics`. The pass is your reading of it, so say what it shows, not more.
   - **human** (`userQuote`, `scope`, `passed`): a person checked it themselves, e.g. on a real device or by reading the draft. Use their exact words and say what the check covered. People can also accept a task in the web view.
 - Don't call anything done without evidence; if it was only checked in one environment or on one input, say which.
@@ -77,19 +77,19 @@ Don't stop, and don't quietly switch approaches in the code.
 
 ## Shared team docs
 
-The team may follow the project in a shared doc (Notion, a wiki, or similar) that you write through its connector. slotboard stays the source of truth; the doc is a copy.
+The team may follow the project in a shared doc (Notion, a wiki, or similar) that you write through its connector. slotledger stays the source of truth; the doc is a copy.
 
-- **Writing:** call `export` (markdown for pages, json for databases) and write its output as is. Replace the whole page, or each entry under its heading (slot key, question ID, task slug). Don't summarize, reword, or add your own entries; if something is missing, record it in slotboard first, then export again.
-- **Reading:** when the doc has a teammate's edit or comment, record it in slotboard before you act on it:
+- **Writing:** call `export` (markdown for pages, json for databases) and write its output as is. Replace the whole page, or each entry under its heading (slot key, question ID, task slug). Don't summarize, reword, or add your own entries; if something is missing, record it in slotledger first, then export again.
+- **Reading:** when the doc has a teammate's edit or comment, record it in slotledger before you act on it:
   - a decision someone stated → `record` with their words in userQuote (goal/approach changes still need the user's agreement)
   - an answer to a listed question → `respond` with the question ID
   - anything that needs the user's call → ask the user, or `ask`
-- After recording, export again and overwrite the doc, so their edit shows up as slotboard's version.
+- After recording, export again and overwrite the doc, so their edit shows up as slotledger's version.
 
 ## Wrapping up
 
-With lifecycle hooks, slotboard builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an execution detail, just finish.
+With lifecycle hooks, slotledger builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an execution detail, just finish.
 
 Without lifecycle hooks, call `checkpoint` before finishing each turn. If it returns a nudge, address any missing records and call `checkpoint({ continued: true })` to get the report. Show that report verbatim to the user; "No new findings" needs no mention. This fallback relies on you calling the tools; it cannot automatically continue a turn or display a report outside your response.
 
-The user can see everything in a browser with `slotboard web`, and act there too. Brief tags what a person did: `human-edit` (they rewrote it in the web view), `human-approved` (they approved your proposal), `human-rejected` (they rejected it), `human-decided` (they decided it some other way). Treat tagged decisions as the user's: ask before changing them. A decision the user deleted simply isn't there any more; don't try to recover it.
+The user can see everything in a browser with `slotledger web`, and act there too. Brief tags what a person did: `human-edit` (they rewrote it in the web view), `human-approved` (they approved your proposal), `human-rejected` (they rejected it), `human-decided` (they decided it some other way). Treat tagged decisions as the user's: ask before changing them. A decision the user deleted simply isn't there any more; don't try to recover it.

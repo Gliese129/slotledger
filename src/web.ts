@@ -79,10 +79,10 @@ export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server:
     try {
       const path = new URL(req.url ?? "/", "http://x").pathname;
       if (!localHost(req.headers.host)) {
-        res.writeHead(421, { "Content-Type": "text/plain" }).end("slotboard web only answers on localhost");
+        res.writeHead(421, { "Content-Type": "text/plain" }).end("slotledger web only answers on localhost");
       } else if (req.method === "POST" && path === "/api/action") {
         const origin = req.headers.origin;
-        if (req.headers["x-slotboard-token"] !== token || (origin && origin !== `http://${req.headers.host}`)) {
+        if (req.headers["x-slotledger-token"] !== token || (origin && origin !== `http://${req.headers.host}`)) {
           json(res, 403, { error: "This page is out of date; reload it." });
           return;
         }
@@ -117,13 +117,13 @@ export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server:
         res.end(JSON.stringify(webState(board)));
       } else if (path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-        res.end(readFileSync(PAGE, "utf8").replace("__SLOTBOARD_TOKEN__", token));
+        res.end(readFileSync(PAGE, "utf8").replace("__SLOTLEDGER_TOKEN__", token));
       } else {
         res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
       }
     } catch (err) {
       board.store.logError("web", err);
-      res.writeHead(500, { "Content-Type": "text/plain" }).end("slotboard error; see .project/run/errors.log");
+      res.writeHead(500, { "Content-Type": "text/plain" }).end("slotledger error; see .project/run/errors.log");
     }
   });
 

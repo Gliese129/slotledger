@@ -19,7 +19,7 @@ export const CAT_LABEL: Record<Category, string> = {
 
 const day = (s: string) => s.slice(0, 16).replace("T", " ");
 
-/** One piece of evidence, naming its source: run (slotboard ran it), ref (produced elsewhere), human (a person's acceptance) */
+/** One piece of evidence, naming its source: run (slotledger ran it), ref (produced elsewhere), human (a person's acceptance) */
 export function describeEvidence(e: Evidence & { at: string }, passed: boolean): string {
   switch (e.kind) {
     case "ref": {
@@ -71,8 +71,8 @@ export function questionsForUser(state: State): QuestionState[] {
 
 /** Current state for the AI (injected at SessionStart, and the brief tool) */
 export function renderBrief(state: State, config: Config, errors = 0): string {
-  const lines: string[] = ["# slotboard project state"];
-  if (errors) lines.push(`⚠ slotboard failed to sync ${errors} time(s) (.project/run/errors.log); some records may be missing.`);
+  const lines: string[] = ["# slotledger project state"];
+  if (errors) lines.push(`⚠ slotledger failed to sync ${errors} time(s) (.project/run/errors.log); some records may be missing.`);
   lines.push("", ...settingsBrief(config));
 
   const slots = live(state);
@@ -133,7 +133,7 @@ function briefLine(s: SlotState): string {
 /** brief({ query }): the slots and tasks that best match, including retired slots so an old key can be reused */
 export function renderSearch(state: State, query: string): string {
   const { slots, tasks } = search(state, query);
-  const lines: string[] = [`# slotboard matches for "${query}"`];
+  const lines: string[] = [`# slotledger matches for "${query}"`];
   if (slots.length) {
     lines.push("", "## Decisions");
     for (const s of slots) {
@@ -157,7 +157,7 @@ export function renderStatusMd(state: State): string {
   const esc = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
   const date = (s: string) => s.slice(0, 16).replace("T", " ");
   const out: string[] = [
-    "<!-- Generated; do not edit by hand. Source: .project/events.jsonl. Live view: npx slotboard web -->",
+    "<!-- Generated; do not edit by hand. Source: .project/events.jsonl. Live view: npx slotledger web -->",
     "# Project status",
     "",
   ];
@@ -266,13 +266,13 @@ export function buildReport(state: State, events: AnyEvent[], session: string, a
       const reply = i.options?.length ? ` Just reply "${i.no}${rec?.id ?? i.options[0].id}".` : ` Just reply "${i.no} <your answer>".`;
       lines.push(`${i.no}. ${i.text}${opts}${rec ? ` Recommended: ${rec.id}.` : ""}${reply}`);
     }
-    if (qItems.length > MAX_LIST) lines.push(`${qItems.length - MAX_LIST} more; see STATUS.md or slotboard web.`);
+    if (qItems.length > MAX_LIST) lines.push(`${qItems.length - MAX_LIST} more; see STATUS.md or slotledger web.`);
     lines.push("");
   }
   if (dItems.length) {
     lines.push(`Decisions I made for you (${dItems.length}; you can withdraw any of them)`);
     for (const i of dItems.slice(0, MAX_LIST)) lines.push(`${i.no}. ${i.text}`);
-    if (dItems.length > MAX_LIST) lines.push(`${dItems.length - MAX_LIST} more; see STATUS.md or slotboard web.`);
+    if (dItems.length > MAX_LIST) lines.push(`${dItems.length - MAX_LIST} more; see STATUS.md or slotledger web.`);
     lines.push(`If you disagree, reply "withdraw ${dItems[0].no}".`, "");
   }
 
@@ -326,5 +326,5 @@ export function buildNudge(state: State, analysis: Analysis | null, strictness: 
 }
 
 export function formatNudge(parts: NudgePart[]): string {
-  return ["slotboard reminder (shown once; handle it, or confirm nothing is needed, then finish):", ...parts.map((p) => `- ${p.text}`), "If it's only an implementation detail, there's nothing to record; just finish."].join("\n");
+  return ["slotledger reminder (shown once; handle it, or confirm nothing is needed, then finish):", ...parts.map((p) => `- ${p.text}`), "If it's only an implementation detail, there's nothing to record; just finish."].join("\n");
 }

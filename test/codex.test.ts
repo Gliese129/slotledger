@@ -13,7 +13,7 @@ import { Store } from "../src/store.js";
 
 const cli = resolve("dist/cli.js");
 let root: string;
-const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CLAUDE") && !["SLOTBOARD_ROOT", "SLOTBOARD_CLIENT", "CODEX_THREAD_ID"].includes(key)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CLAUDE") && !["SLOTLEDGER_ROOT", "SLOTLEDGER_CLIENT", "CODEX_THREAD_ID"].includes(key)));
 function write(path: string, text: string) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
   writeFileSync(join(root, path), text);
@@ -30,7 +30,7 @@ function hook(event: string, input: object) {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "slotboard-codex-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "slotledger-codex-")));
   execFileSync("git", ["init", "-q"], { cwd: root });
   write(".gitignore", ".project/\nSTATUS.md\n");
   write("src/main.ts", "export {};\n");
@@ -43,8 +43,8 @@ afterEach(() => {
 
 describe("Codex setup", () => {
   it("merges TOML and hooks, installs the skill, and is safe to rerun", () => {
-    write(".codex/config.toml", 'model = "existing-model"\n[mcp_servers.other]\ncommand = "other"\n[mcp_servers.slotboard]\nurl = "https://old.example/mcp"\ndisabled_tools = ["verify"]\n');
-    write(".codex/hooks.json", JSON.stringify({ description: "existing hooks", hooks: { Stop: [{ hooks: [{ type: "command", command: "echo keep-me" }, { type: "command", command: "slotboard hook stop" }] }] } }));
+    write(".codex/config.toml", 'model = "existing-model"\n[mcp_servers.other]\ncommand = "other"\n[mcp_servers.slotledger]\nurl = "https://old.example/mcp"\ndisabled_tools = ["verify"]\n');
+    write(".codex/hooks.json", JSON.stringify({ description: "existing hooks", hooks: { Stop: [{ hooks: [{ type: "command", command: "echo keep-me" }, { type: "command", command: "slotledger hook stop" }] }] } }));
     run("init", "--client", "codex");
     const first = readFileSync(join(root, ".codex/config.toml"), "utf8");
     const hooks = readFileSync(join(root, ".codex/hooks.json"), "utf8");
@@ -54,13 +54,13 @@ describe("Codex setup", () => {
     const config = parse(first) as any;
     expect(config.model).toBe("existing-model");
     expect(config.mcp_servers.other.command).toBe("other");
-    expect(config.mcp_servers.slotboard).toMatchObject({ command: process.execPath, args: [cli], cwd: root, disabled_tools: ["verify"], env: { SLOTBOARD_ROOT: root, SLOTBOARD_CLIENT: "codex" } });
-    expect(config.mcp_servers.slotboard.url).toBeUndefined();
+    expect(config.mcp_servers.slotledger).toMatchObject({ command: process.execPath, args: [cli], cwd: root, disabled_tools: ["verify"], env: { SLOTLEDGER_ROOT: root, SLOTLEDGER_CLIENT: "codex" } });
+    expect(config.mcp_servers.slotledger.url).toBeUndefined();
     const parsed = JSON.parse(hooks);
     expect(parsed.hooks.Stop.flatMap((g: any) => g.hooks)).toHaveLength(2);
     expect(parsed.hooks.Stop[0].hooks[0].command).toBe("echo keep-me");
     expect(parsed.hooks.SessionEnd[0].hooks[0].timeout).toBe(3);
-    expect(existsSync(join(root, ".agents/skills/slotboard/SKILL.md"))).toBe(true);
+    expect(existsSync(join(root, ".agents/skills/slotledger/SKILL.md"))).toBe(true);
     expect(existsSync(join(root, ".claude"))).toBe(false);
     expect(existsSync(join(root, ".mcp.json"))).toBe(false);
   });
@@ -90,13 +90,13 @@ describe("Codex lifecycle", () => {
     const store = new Store(root);
     store.writeRun(`session-${process.ppid}.json`, { session: "unrelated-claude" });
     vi.stubEnv("CODEX_THREAD_ID", "codex-env");
-    vi.stubEnv("SLOTBOARD_CLIENT", "codex");
+    vi.stubEnv("SLOTLEDGER_CLIENT", "codex");
     expect(currentSession(store, "conn-1", { threadId: "codex-request" })).toEqual({ id: "codex-request", via: "request" });
     expect(currentSession(store, "conn-2").id).toBe("codex-env");
     vi.stubEnv("CODEX_THREAD_ID", "");
     expect(currentSession(store, "conn-3")).toEqual({ id: "conn-3", via: "connection" });
     expect(currentSession(store, "conn-4", { threadId: "../../outside" }).id).toBe("conn-4");
-    vi.stubEnv("SLOTBOARD_CLIENT", "claude-code");
+    vi.stubEnv("SLOTLEDGER_CLIENT", "claude-code");
     vi.stubEnv("CLAUDE_PID", "2147483647");
     vi.stubEnv("CLAUDE_CODE_SESSION_ID", "claude-env");
     vi.stubEnv("CODEX_THREAD_ID", "codex-env");

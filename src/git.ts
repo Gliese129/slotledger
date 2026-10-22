@@ -16,7 +16,7 @@ function git(root: string, args: string[], env?: NodeJS.ProcessEnv): string {
 
 /** Working-tree snapshot through a temporary index, leaving the user's staging area alone. Null outside a git repo. */
 export function snapshot(root: string): Snapshot | null {
-  const dir = mkdtempSync(join(tmpdir(), "slotboard-"));
+  const dir = mkdtempSync(join(tmpdir(), "slotledger-"));
   try {
     let head: string | null = null;
     try { head = git(root, ["rev-parse", "--verify", "-q", "HEAD"]); } catch { head = null; }

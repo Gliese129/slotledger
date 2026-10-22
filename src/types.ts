@@ -73,7 +73,7 @@ export interface Event<T extends EventType = EventType> {
 
 export type AnyEvent = { [T in EventType]: Event<T> }[EventType];
 
-/** One status per task. needs_review and verified are never set directly: slotboard derives needs_review when decisions a task rests on change, and only passing evidence sets verified */
+/** One status per task. needs_review and verified are never set directly: slotledger derives needs_review when decisions a task rests on change, and only passing evidence sets verified */
 export const TASK_STATUSES = ["todo", "in_progress", "implemented", "needs_review", "verified", "dropped"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 /** What a task can be set to with the task tool */
@@ -82,7 +82,7 @@ export const SETTABLE_STATUSES = ["todo", "in_progress", "implemented", "dropped
 export const EVIDENCE_KINDS = ["run", "ref", "human"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
-/** A command slotboard ran itself; events written before evidence kinds existed have no kind */
+/** A command slotledger ran itself; events written before evidence kinds existed have no kind */
 export interface RunEvidence {
   kind?: "run";
   cmd: string;
@@ -91,7 +91,7 @@ export interface RunEvidence {
   env: string;
 }
 
-/** Evidence produced elsewhere: a report, a receipt, a job ID, a URL. slotboard hashes local files; the pass/fail call is the AI's */
+/** Evidence produced elsewhere: a report, a receipt, a job ID, a URL. slotledger hashes local files; the pass/fail call is the AI's */
 export interface RefEvidence {
   kind: "ref";
   refs: EvidenceRef[];

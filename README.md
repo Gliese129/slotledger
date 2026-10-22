@@ -1,4 +1,4 @@
-# slotboard
+# slotledger
 
 **Every decision your AI makes: visible, traceable, revocable.**
 
@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 AI coding agents are honest in their replies, but the project state they leave behind drifts. A sync backend gets swapped inside `config.ts` without a word. A "temporary" choice becomes the default three sessions later. The TODO says done while the plan says not started. Docs pile up and none are ever retired. And when a premise changes — "our users are on Windows" turns out to be wrong — nobody goes back to the decisions that rested on it.
 
-slotboard is an MCP server plus Claude Code and Codex hooks that records each decision as a **versioned slot** with its rationale and the premises it depends on. When a premise changes, everything built on it is flagged automatically, and you get a short report at the end of the turn with the questions that need you.
+slotledger is an MCP server plus Claude Code and Codex hooks that records each decision as a **versioned slot** with its rationale and the premises it depends on. When a premise changes, everything built on it is flagged automatically, and you get a short report at the end of the turn with the questions that need you.
 
 - 🚦 **Never blocks your flow.** It flags instead of refusing. The only hard stop is the AI trying to override a goal or approach decision you made yourself.
 - 🔗 **Dependencies locked like a lockfile.** `approach/sync-backend` depends on `assum/user-os@1`. Bump the assumption and the sync decision goes stale, with a question generated from its own rationale.
@@ -32,40 +32,31 @@ If you disagree, reply "withdraw 2".
 Everything else is done: config-dir-macos (verified on darwin 25.1.0 arm64, node v22.23.0)
 ```
 
-slotboard writes this report itself and shows it to you directly, so the AI can't soften it.
+slotledger writes this report itself and shows it to you directly, so the AI can't soften it.
 
 ## Quick start
 
-Requirements: Node.js 20+, git, and [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/). slotboard isn't on npm yet, so build it from source:
+Requirements: Node.js 20+, git, and [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/). In the project you want to track:
 
 ```bash
-git clone https://github.com/Gliese129/slotboard.git
-cd slotboard
-npm install
-npm run build
+npx slotledger init --language English --strictness balanced
 ```
 
-Then, in the project you want to track:
+`init` writes the MCP server to `.mcp.json`, the hooks to `.claude/settings.json`, the skill to `.claude/skills/slotledger/SKILL.md`, and creates `.project/config.json`. Start a new Claude Code session and it's live. If you leave out `--language` or `--strictness`, the AI asks you in the first session.
+
+For Codex, add `--client codex` (or `--client both` for both clients):
 
 ```bash
-node /path/to/slotboard/dist/cli.js init --language English --strictness balanced
-mkdir -p .claude/skills/slotboard
-cp /path/to/slotboard/skill/SKILL.md .claude/skills/slotboard/
+npx slotledger init --client codex --language English --strictness balanced
 ```
 
-`init` writes the MCP server to `.mcp.json`, the hooks to `.claude/settings.json`, and creates `.project/config.json`. Start a new Claude Code session and it's live. If you leave out `--language` or `--strictness`, the AI asks you in the first session.
+This merges the MCP server into `.codex/config.toml`, installs the four lifecycle hooks in `.codex/hooks.json`, and copies the skill to `.agents/skills/slotledger/SKILL.md`. Existing server settings and unrelated hooks are preserved; TOML formatting and comments are rewritten. Trust the project and review/trust the hooks in Codex, then start a new session. See [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks).
 
-For Codex, run this in the project you want to track:
-
-```bash
-node /path/to/slotboard/dist/cli.js init --client codex --language English --strictness balanced
-```
-
-This merges the MCP server into `.codex/config.toml`, installs the four lifecycle hooks in `.codex/hooks.json`, and copies the skill to `.agents/skills/slotboard/SKILL.md`. Existing server settings and unrelated hooks are preserved; TOML formatting and comments are rewritten. Use `--client both` to install both clients. Trust the project and review/trust the hooks in Codex, then start a new session. See [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks).
+When run through npx, `init` pins the version it was run with: hooks and the MCP server start `slotledger@<that version>` through `npm exec`, so clearing npx's cache doesn't break them, and the first start after that downloads it again. To upgrade, run `npx slotledger@latest init` again. Installed globally (`npm i -g slotledger`) or built from source, `init` points at that copy instead.
 
 Codex MCP calls use their per-request `threadId` to share the hook session, including across reconnections. Without hooks, call `brief` before editing and `checkpoint` before finishing each turn; after a nudge, call `checkpoint({ continued: true })` and show the report verbatim. `brief({ prompt: "1A" })` resolves reply numbers. This fallback depends on the agent calling these tools; without a thread ID, sessions fall back to the MCP connection.
 
-For sharper "undeclared change" checks, tell slotboard which paths belong to which topic:
+For sharper "undeclared change" checks, tell slotledger which paths belong to which topic:
 
 ```json
 {
@@ -84,7 +75,7 @@ Commit `.project/events.jsonl` with your code: the state then follows branches a
 |---|---|
 | `record` | It makes or changes a decision. Same key again means a new version. |
 | `task` | It starts, advances, or drops a piece of work, by slug. |
-| `verify` | Before claiming something works, with one kind of evidence: a command slotboard runs (run), evidence produced elsewhere such as a report or a job ID (ref, local files hashed), or a person's acceptance in their words (human). |
+| `verify` | Before claiming something works, with one kind of evidence: a command slotledger runs (run), evidence produced elsewhere such as a report or a job ID (ref, local files hashed), or a person's acceptance in their words (human). |
 | `ask` | It needs your call while you're away. The question goes into the report. |
 | `respond` | You reply to the report (`1A`, `withdraw 2`) or answer a question. |
 | `brief` | Read-only: live decisions, stale flags, open questions, tasks. |
@@ -121,33 +112,35 @@ The earlier names `product/`, `arch/` and `platform/` still work as aliases of `
 | `balanced` (default) | goal, approach, env, and the assumptions they rest on | Nudges once per finding |
 | `loose` | goal and approach only | Never interrupts the AI; findings only appear in the report |
 
-Change it any time with `slotboard config --strictness loose`.
+Change it any time with `npx slotledger config --strictness loose`.
 
 ## Commands
 
+Run these with `npx slotledger …`, or drop the `npx` after `npm i -g slotledger`.
+
 ```bash
-slotboard                 # run the MCP server (stdio)
-slotboard init [dir] [--client claude-code|codex|both] [--language L] [--strictness S]
-slotboard config [--language L] [--strictness S]
-slotboard status          # print the brief and refresh STATUS.md
-slotboard web [--open]    # local web view: review, approve, reject, edit, delete
-slotboard export [--format markdown|json]   # project state for a shared team doc
+slotledger                 # run the MCP server (stdio)
+slotledger init [dir] [--client claude-code|codex|both] [--language L] [--strictness S]
+slotledger config [--language L] [--strictness S]
+slotledger status          # print the brief and refresh STATUS.md
+slotledger web [--open]    # local web view: review, approve, reject, edit, delete
+slotledger export [--format markdown|json]   # project state for a shared team doc
 ```
 
 ## Sharing with your team
 
-To keep a team in the loop, ask the AI to put the project state in your shared docs (Notion, a wiki, anything it has a connector for). It calls `export` and writes the output as is, overwriting the page or each entry under its key, so the doc always matches slotboard. When a teammate comments or edits there, the AI records that in slotboard first (`record`, `respond`, or `ask`) and then exports again. slotboard stays the source of truth; this rule lives in the tool description and `SKILL.md`, so it is a convention, not an enforced sync.
+To keep a team in the loop, ask the AI to put the project state in your shared docs (Notion, a wiki, anything it has a connector for). It calls `export` and writes the output as is, overwriting the page or each entry under its key, so the doc always matches slotledger. When a teammate comments or edits there, the AI records that in slotledger first (`record`, `respond`, or `ask`) and then exports again. slotledger stays the source of truth; this rule lives in the tool description and `SKILL.md`, so it is a convention, not an enforced sync.
 
 ## How it works
 
 - `.project/events.jsonl` is an append-only log and the only real data. Current state is a fold over it, recomputed on every read.
 - A slot's key never changes; its value moves forward in versions. Each version records its rationale, its source (you or the AI), and the exact versions of the slots it depends on.
 - Stale premises, confirmation state (`proposed`, `decided`, `accepted_by_default` after N sessions without objection, `rejected`), and the questions they raise are derived, never stored.
-- Hooks and the MCP server fail open: if slotboard errors, the AI keeps working and the brief notes what wasn't synced.
+- Hooks and the MCP server fail open: if slotledger errors, the AI keeps working and the brief notes what wasn't synced.
 
 ## Status
 
-v0, and it works on itself: this repo is developed with slotboard tracking it. Known gaps:
+0.1, and it works on itself: this repo is developed with slotledger tracking it. Known gaps:
 
 - Automatic lifecycle checks require enabled, trusted hooks. Without them, the agent must call `brief` and `checkpoint`.
 - With two sessions in the same working tree, each one is blamed for the other's changes. Telling human edits from AI edits isn't implemented yet.
@@ -156,6 +149,9 @@ v0, and it works on itself: this repo is developed with slotboard tracking it. K
 ## Development
 
 ```bash
+git clone https://github.com/Gliese129/slotledger.git
+cd slotledger
 npm install
 npm test      # builds, then runs vitest
+node dist/cli.js init /path/to/project   # try your local build in another project
 ```

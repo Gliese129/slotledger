@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>slotboard</title>
+<title>slotledger</title>
 <style>
 :root {
   --bg: #f6f6f3; --surface: #ffffff; --surface-2: #f1f1ed; --hover: #f7f7f4; --border: #e4e4de; --text: #1c1c1a; --muted: #67675f; --faint: #9b9b93;
@@ -185,7 +185,7 @@ pre { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-
 <body>
 <header>
   <div class="wrap bar">
-    <div class="brand">slotboard <span id="project"></span></div>
+    <div class="brand">slotledger <span id="project"></span></div>
     <nav id="nav"></nav>
     <div class="tools">
       <input id="search" type="search" placeholder="Search decisions and tasks" autocomplete="off">
@@ -208,15 +208,15 @@ const STATUS = { decided: "Decided", proposed: "Proposed by AI", accepted_by_def
 const TASK = { needs_review: "Needs review", in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped" };
 const TABS = [["overview", "Overview"], ["decisions", "Decisions"], ["tasks", "Tasks"], ["activity", "Activity"]];
 const ASKS = ["goal", "approach", "env", "assum"]; // categories the end-of-turn report asks about
-const TOKEN = "__SLOTBOARD_TOKEN__"; // filled in by the server; writes are refused without it
-const SOURCE = { run: "ran by slotboard", ref: "by reference", human: "by a person" };
+const TOKEN = "__SLOTLEDGER_TOKEN__"; // filled in by the server; writes are refused without it
+const SOURCE = { run: "ran by slotledger", ref: "by reference", human: "by a person" };
 const SOURCE_NOTE = { run: "", ref: " (by reference)", human: " (by a person)" };
 const TAG_TIP = { "human-edit": "Edited by a person in the web view", "human-approved": "A person approved this AI proposal", "human-rejected": "A person rejected this", "human-decided": "A person decided this" };
 
 let data = null, etag = null, lastOk = 0, D = null;
 const ui = { tab: "overview", sel: null, cat: "all", showOld: false, q: "", closed: new Set(), sessions: false };
-try { Object.assign(ui, JSON.parse(localStorage.getItem("slotboard-ui2") || "{}")); ui.closed = new Set(ui.closed || []); ui.q = ""; ui.sel = null; } catch {}
-const saveUi = () => { try { localStorage.setItem("slotboard-ui2", JSON.stringify({ cat: ui.cat, showOld: ui.showOld, closed: [...ui.closed], sessions: ui.sessions })); } catch {} };
+try { Object.assign(ui, JSON.parse(localStorage.getItem("slotledger-ui2") || "{}")); ui.closed = new Set(ui.closed || []); ui.q = ""; ui.sel = null; } catch {}
+const saveUi = () => { try { localStorage.setItem("slotledger-ui2", JSON.stringify({ cat: ui.cat, showOld: ui.showOld, closed: [...ui.closed], sessions: ui.sessions })); } catch {} };
 
 // ---------- helpers ----------
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -249,7 +249,7 @@ const htag = (t) => (t ? h`<span class="htag ${t}" title="${TAG_TIP[t]}">${t}</s
 const canJudge = (v) => v && !v.retired && v.source === "agent" && !v.confirmed;
 const isSel = (type, id) => ui.sel && ui.sel.type === type && ui.sel.id === id;
 const open = (type, id) => new Raw(`data-open="${esc(type + ":" + id)}"`);
-const actor = (a) => (!a ? "" : a.kind === "human" ? (a.channel === "web" ? "you, in the web view" : "you") : a.kind === "agent" ? "AI" : "slotboard");
+const actor = (a) => (!a ? "" : a.kind === "human" ? (a.channel === "web" ? "you, in the web view" : "you") : a.kind === "agent" ? "AI" : "slotledger");
 
 // ---------- derived ----------
 function derive() {
@@ -354,7 +354,7 @@ function tasks() {
   const ts = data.tasks.filter((t) => match(t.slug, t.title, t.note));
   return h`
     <h1 class="page-title">Tasks</h1>
-    <p class="page-sub">Work only counts as verified with evidence: a command slotboard ran, a referenced report or record, or a person's acceptance. Each shows its source.</p>
+    <p class="page-sub">Work only counts as verified with evidence: a command slotledger ran, a referenced report or record, or a person's acceptance. Each shows its source.</p>
     ${order.map((st) => {
       const l = ts.filter((t) => t.status === st);
       if (!l.length) return "";
@@ -551,7 +551,7 @@ function toast(msg, err = false) {
 }
 async function act(body) {
   try {
-    const r = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-Slotboard-Token": TOKEN }, body: JSON.stringify(body) });
+    const r = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-Slotledger-Token": TOKEN }, body: JSON.stringify(body) });
     const res = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(res.error || `Failed (${r.status})`);
     toast(res.message || "Done");
@@ -592,14 +592,14 @@ function render() {
   D = derive();
   numberVersions();
   document.getElementById("project").textContent = "· " + data.project;
-  document.title = `${data.project} · slotboard`;
+  document.title = `${data.project} · slotledger`;
   const badge = { overview: [D.needs, true], decisions: [data.slots.filter(live).length], tasks: [D.openTasks.length], activity: [0] };
   document.getElementById("nav").innerHTML = TABS.map(([id, label]) => {
     const [n, hot] = badge[id];
     return h`<a href="#${id}" class="${ui.tab === id && !ui.q ? "on" : ""}">${label}${n ? h`<span class="n ${hot ? "hot" : ""}">${n}</span>` : ""}</a>`.s;
   }).join("");
   const page = ui.q ? searchPage() : { overview, decisions, tasks, activity }[ui.tab]();
-  const banner = data.errors ? h`<div class="banner">⚠ slotboard failed to sync ${data.errors} time(s); some records may be missing (.project/run/errors.log).</div>` : "";
+  const banner = data.errors ? h`<div class="banner">⚠ slotledger failed to sync ${data.errors} time(s); some records may be missing (.project/run/errors.log).</div>` : "";
   const y = window.scrollY;
   document.getElementById("main").innerHTML = h`${banner}${page}`.s;
   window.scrollTo(0, y);
@@ -680,7 +680,7 @@ async function poll() {
 let pollTimer = 0;
 function setLive(ok) {
   document.getElementById("live").classList.toggle("off", !ok);
-  document.getElementById("liveText").textContent = ok ? "Live" : lastOk ? "Reconnecting…" : "Can't reach slotboard web";
+  document.getElementById("liveText").textContent = ok ? "Live" : lastOk ? "Reconnecting…" : "Can't reach slotledger web";
 }
 setInterval(() => document.querySelectorAll("time[datetime]").forEach((t) => { t.textContent = ago(t.getAttribute("datetime")); }), 30000);
 poll();

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { commandLine } from "./launch.js";
 import type { Config, Strictness } from "./types.js";
 import { STRICTNESS } from "./types.js";
 
@@ -30,8 +30,7 @@ export function isConfigured(config: Config): boolean {
 
 /** The exact command an AI should run to save the user's choices */
 export function configCommand(): string {
-  const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
-  return `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} config --language "<language>" --strictness <${STRICTNESS.join("|")}>`;
+  return commandLine(`config --language "<language>" --strictness <${STRICTNESS.join("|")}>`);
 }
 
 /** Brief section: either how to record (configured) or what to ask the user first (not configured) */
@@ -39,7 +38,7 @@ export function settingsBrief(config: Config): string[] {
   if (!isConfigured(config)) {
     const missing = [!config.language && "language", !config.strictness && "strictness"].filter(Boolean).join(" and ");
     return [
-      `⚠ slotboard ${missing} not set for this project. Before recording anything, ask the user:`,
+      `⚠ slotledger ${missing} not set for this project. Before recording anything, ask the user:`,
       "1. Which language should decisions, rationales, task titles and questions be written in?",
       `2. How strict should recording be? ${STRICTNESS.map((s) => `${s}: ${STRICTNESS_GUIDE[s].summary}`).join("; ")}. (balanced is the default.)`,
       `Then save their answers with: ${configCommand()}`,

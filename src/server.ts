@@ -3,17 +3,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { Board, FixableError } from "./board.js";
 import { EXPORT_FORMATS } from "./export.js";
+import { PKG } from "./launch.js";
 import { currentSession } from "./session.js";
 import { Store, resolveRoot, ulid } from "./store.js";
 import { CATEGORIES, SETTABLE_STATUSES } from "./types.js";
 
-const VERSION = "0.0.1";
 
 export function createServer(root = resolveRoot()): McpServer {
   const store = new Store(root);
   const board = new Board(store);
   const connectionId = "conn-" + ulid().toLowerCase();
-  const server = new McpServer({ name: "slotboard", version: VERSION });
+  const server = new McpServer({ name: "slotledger", version: PKG.version });
   // Tool descriptions are read once at startup; brief carries the live settings
   const language = store.readConfig().language;
   const writeIn = language ? ` Write value and rationale in ${language}.` : "";
@@ -28,7 +28,7 @@ export function createServer(root = resolveRoot()): McpServer {
       if (err instanceof FixableError) return { content: [{ type: "text" as const, text: err.message }], isError: true };
       // Fail open: log the error and let the AI keep working
       store.logError(where, err);
-      return { content: [{ type: "text" as const, text: `slotboard hit an internal error and didn't record this (logged to .project/run/errors.log). Carry on working as usual.` }], isError: true };
+      return { content: [{ type: "text" as const, text: `slotledger hit an internal error and didn't record this (logged to .project/run/errors.log). Carry on working as usual.` }], isError: true };
     }
   };
 
@@ -54,7 +54,7 @@ export function createServer(root = resolveRoot()): McpServer {
   server.registerTool("task", {
     description:
       "Call when you start, advance, or drop a piece of work. Refer to it by slug. Each task has one status: todo, in_progress, implemented, needs_review, verified, dropped. " +
-      "Only verify can set verified. slotboard sets needs_review when decisions in basedOn change; resolve it by re-verifying, by passing basedOn again with a note saying why it still holds, or by dropping it.",
+      "Only verify can set verified. slotledger sets needs_review when decisions in basedOn change; resolve it by re-verifying, by passing basedOn again with a note saying why it still holds, or by dropping it.",
     inputSchema: {
       slug: z.string().describe("Lowercase with dashes, e.g. migrate-platform-to-macos"),
       title: z.string().optional().describe("Required when creating"),
@@ -68,10 +68,10 @@ export function createServer(root = resolveRoot()): McpServer {
   server.registerTool("verify", {
     description:
       "Call before claiming work is done, with exactly one kind of evidence. " +
-      "run: pass cmd and slotboard runs it (exit 0 passes); prefer this whenever a command can check the work. " +
+      "run: pass cmd and slotledger runs it (exit 0 passes); prefer this whenever a command can check the work. " +
       "ref: when the evidence was produced elsewhere (a report, a receipt, an experiment log, a job in another system), pass refs, summary and passed; local files get hashed so the evidence names the exact version. " +
       "human: when a person checked it themselves, pass userQuote (their exact words), scope and passed. " +
-      "Only a pass marks the task verified; on failure the status stays. The source is shown with the result, so a ref or human pass never reads as a run slotboard did.",
+      "Only a pass marks the task verified; on failure the status stays. The source is shown with the result, so a ref or human pass never reads as a run slotledger did.",
     inputSchema: {
       slug: z.string(),
       cmd: z.string().optional().describe("run: a command that proves it works, e.g. npm test -- sync"),
@@ -116,7 +116,7 @@ export function createServer(root = resolveRoot()): McpServer {
   }, (args, extra) => run("brief", (s) => [board.brief(args.query), args.prompt ? board.replyContext(s, args.prompt) : null].filter(Boolean).join("\n\n"), extra._meta));
 
   server.registerTool("checkpoint", {
-    description: "Before finishing a turn without lifecycle hooks, check git changes and build the slotboard report. Address any nudge, then call again with continued: true and show the returned report to the user verbatim.",
+    description: "Before finishing a turn without lifecycle hooks, check git changes and build the slotledger report. Address any nudge, then call again with continued: true and show the returned report to the user verbatim.",
     inputSchema: {
       continued: z.boolean().optional().describe("true after addressing a previous checkpoint nudge"),
     },

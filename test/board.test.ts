@@ -24,7 +24,7 @@ function start(session: string) {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "slotboard-test-"));
+  root = mkdtempSync(join(tmpdir(), "slotledger-test-"));
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
@@ -191,7 +191,7 @@ describe("web view", () => {
     try {
       const page = await fetch(url);
       expect(page.status).toBe(200);
-      expect(await page.text()).toContain("<title>slotboard</title>");
+      expect(await page.text()).toContain("<title>slotledger</title>");
 
       const r = await fetch(url + "api/state");
       const etag = r.headers.get("etag")!;
@@ -422,12 +422,12 @@ describe("human actions in the web view", () => {
       const post = (headers: Record<string, string>, body: unknown = { action: "approve", key: "goal/autostart" }) =>
         fetch(url + "api/action", { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
       expect((await post({})).status).toBe(403);
-      expect((await post({ "X-Slotboard-Token": token, Origin: "https://evil.example" })).status).toBe(403);
-      expect((await post({ "X-Slotboard-Token": token }, { action: "drop-table" })).status).toBe(400);
-      const ok = await post({ "X-Slotboard-Token": token });
+      expect((await post({ "X-Slotledger-Token": token, Origin: "https://evil.example" })).status).toBe(403);
+      expect((await post({ "X-Slotledger-Token": token }, { action: "drop-table" })).status).toBe(400);
+      const ok = await post({ "X-Slotledger-Token": token });
       expect(ok.status).toBe(200);
       expect((await ok.json()).message).toContain("Approved");
-      const bad = await post({ "X-Slotboard-Token": token }, { action: "edit", key: "goal/nope", value: "x" });
+      const bad = await post({ "X-Slotledger-Token": token }, { action: "edit", key: "goal/nope", value: "x" });
       expect([bad.status, (await bad.json()).error]).toEqual([400, "goal/nope doesn't exist any more."]);
     } finally {
       server.close();
@@ -461,7 +461,7 @@ describe("legacy category names", () => {
     board.store.append("slot.versioned", { kind: "agent", session: "s1" }, { key: "assum/user-os", value: "macOS", rationale: "Correction", depends: [], topics: [], userQuote: "macOS" });
     const q = [...board.load().state.questions.values()][0];
     expect(q.about).toEqual(["goal/tray-icon", "assum/user-os"]);
-    // the id an older slotboard gave this question, which the user answered
+    // the id an older slotledger gave this question, which the user answered
     expect(q.qid).toBe("sq-" + shortHash("product/tray-icon@1|assum/user-os@2"));
     board.store.append("question.answered", { kind: "human", via: "s1" }, { qid: q.qid, option: "B", userQuote: "rethink it" });
     expect(board.load().state.questions.get(q.qid)!.status).toBe("answered");

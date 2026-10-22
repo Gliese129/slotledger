@@ -42,8 +42,8 @@ export function currentSession(store: Store, connectionId: string, meta?: Record
   // so request metadata must win over process-level environment and Claude PID links.
   const thread = meta?.threadId;
   if (typeof thread === "string" && /^[a-zA-Z0-9_-]+$/.test(thread)) return { id: thread, via: "request" };
-  const codex = process.env.SLOTBOARD_CLIENT === "codex" ||
-    (process.env.SLOTBOARD_CLIENT !== "claude-code" && !process.env.CLAUDE_CODE_SESSION_ID && !process.env.CLAUDE_PID && !!process.env.CODEX_THREAD_ID);
+  const codex = process.env.SLOTLEDGER_CLIENT === "codex" ||
+    (process.env.SLOTLEDGER_CLIENT !== "claude-code" && !process.env.CLAUDE_CODE_SESSION_ID && !process.env.CLAUDE_PID && !!process.env.CODEX_THREAD_ID);
   if (codex) {
     const id = process.env.CODEX_THREAD_ID;
     return id && /^[a-zA-Z0-9_-]+$/.test(id) ? { id, via: "env" } : { id: connectionId, via: "connection" };
