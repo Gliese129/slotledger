@@ -250,3 +250,37 @@ describe("recording settings", () => {
     expect(board.stop("s2", false).block).toContain("add-sync is implemented but not verified");
   });
 });
+
+describe("export", () => {
+  it("markdown lists live decisions, team questions and tasks under stable headings", () => {
+    seedWindowsWorld();
+    board.task("s1", { slug: "add-sync", title: "Add sync", basedOn: ["arch/sync-backend"] });
+    board.record("s1", { key: "dep/old-lib", value: "old", rationale: "r" });
+    board.record("s1", { key: "dep/old-lib", value: "old", rationale: "r", retired: true });
+    start("s2");
+    board.record("s2", { key: "assum/user-os", value: "Users are on macOS", rationale: "Corrected", userQuote: "macOS actually" });
+
+    const md = board.export();
+    expect(md).toContain("### arch/sync-backend");
+    expect(md).toContain("- Depends on: assum/user-os v1 ⚠ premise changed (now v2)");
+    expect(md).toContain(`- User's words: "OneDrive then"`);
+    expect(md).toContain(`- History: v1 "Users are all on Windows" → v2 "Users are on macOS"`);
+    expect(md).not.toContain("dep/old-lib");
+    // arch's stale premise needs the user; platform's is the AI's to review
+    const qid = [...board.load().state.questions.values()].find((q) => q.premise?.slot === "arch/sync-backend")!.qid;
+    expect(md).toContain(`### ${qid}`);
+    expect(md.match(/^### sq-/gm)).toHaveLength(1);
+    expect(md).toContain("### add-sync");
+    expect(md).toContain("⚠ needs review (arch/sync-backend changed)");
+    expect(md).toContain(`(event ${board.store.readEvents().at(-1)!.id})`);
+  });
+
+  it("json carries the same entries, and an empty board still exports", () => {
+    expect(board.export()).toContain("## Decisions\n\n(none)");
+    seedWindowsWorld();
+    const x = JSON.parse(board.export("json"));
+    expect(x.decisions.map((d: { key: string }) => d.key)).toEqual(["arch/sync-backend", "platform/target-os", "assum/user-os"]);
+    expect(x.decisions[0]).toMatchObject({ version: 1, status: "decided", source: "user", depends: [{ key: "assum/user-os", n: 1, current: 1 }] });
+    expect(x.asOf.event).toBe(board.store.readEvents().at(-1)!.id);
+  });
+});

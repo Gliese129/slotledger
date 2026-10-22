@@ -5,20 +5,20 @@ import type { Config, Strictness } from "./types.js";
 import { CATEGORIES, GUARDED } from "./types.js";
 import { settingsBrief } from "./settings.js";
 
-const STATUS_LABEL: Record<VersionState["status"], string> = {
+export const STATUS_LABEL: Record<VersionState["status"], string> = {
   decided: "decided",
   proposed: "proposed",
   accepted_by_default: "accepted by default",
   rejected: "rejected",
 };
 
-const CAT_LABEL: Record<Category, string> = {
+export const CAT_LABEL: Record<Category, string> = {
   product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumption", dep: "Dependency", constraint: "Constraint",
 };
 
 const MAX_LIST = 3;
 
-function live(state: State): SlotState[] {
+export function live(state: State): SlotState[] {
   const order = (s: SlotState) => CATEGORIES.indexOf(s.category);
   return [...state.slots.values()].filter((s) => s.current && !s.current.retired).sort((a, b) => order(a) - order(b) || a.key.localeCompare(b.key));
 }

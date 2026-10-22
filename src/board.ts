@@ -4,6 +4,7 @@ import { arch, platform, release } from "node:os";
 import { join } from "node:path";
 import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, type State } from "./fold.js";
+import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
 import { buildNudge, buildReport, formatNudge, renderBrief, renderStatusMd, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
@@ -71,6 +72,11 @@ export class Board {
 
   brief(): string {
     return renderBrief(this.load().state, this.store.readConfig(), this.store.errorCount());
+  }
+
+  export(format: ExportFormat = "markdown"): string {
+    const { events, state } = this.load();
+    return renderExport(buildExport(state, events, this.store.root), format);
   }
 
   // ---------- record ----------

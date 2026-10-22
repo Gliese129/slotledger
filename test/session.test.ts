@@ -10,7 +10,7 @@ function resolveFromGrandchild(root: string, extraEnv: Record<string, string> = 
   const dist = resolve("dist/session.js");
   const store = resolve("dist/store.js");
   const script = `import("${dist}").then(async (s) => { const { Store } = await import("${store}"); console.log(JSON.stringify(s.currentSession(new Store(${JSON.stringify(root)}), "conn-x"))); })`;
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CLAUDE")));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CLAUDE") && !["CODEX_THREAD_ID", "SLOTBOARD_CLIENT"].includes(k)));
   const out = execFileSync("sh", ["-c", `"${process.execPath}" -e '${script}'; :`], { env: { ...env, ...extraEnv }, encoding: "utf8" });
   return JSON.parse(out.trim());
 }

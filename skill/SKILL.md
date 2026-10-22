@@ -19,6 +19,10 @@ Before installing slotboard into a project (or when brief says the settings aren
 
 Follow the language and strictness that brief shows for the project.
 
+For Codex, install with `slotboard init --client codex` (or `--client both` for Codex and Claude Code). This writes project-local MCP and hooks config and installs this skill under `.agents/skills/slotboard/`. Codex must trust the project and its hook definitions before the hooks run.
+
+Call `brief` before editing when hooks are unavailable; this establishes the session's git baseline. When the user replies with a report number, pass their reply as `brief({ prompt: "1A" })` to read the numbered items before calling `respond`.
+
 ## When to record
 
 Record as soon as you make or change one of these decisions, not at the end:
@@ -60,8 +64,21 @@ Don't stop, and don't quietly switch approaches in the code.
 - If the user isn't around, use `ask`; the question appears in the end-of-turn report.
 - When the user replies to report numbers, e.g. "1A" or "withdraw 2", use `respond`. userQuote is the user's exact words.
 
+## Shared team docs
+
+The team may follow the project in a shared doc (Notion, a wiki, or similar) that you write through its connector. slotboard stays the source of truth; the doc is a copy.
+
+- **Writing:** call `export` (markdown for pages, json for databases) and write its output as is. Replace the whole page, or each entry under its heading (slot key, question ID, task slug). Don't summarize, reword, or add your own entries; if something is missing, record it in slotboard first, then export again.
+- **Reading:** when the doc has a teammate's edit or comment, record it in slotboard before you act on it:
+  - a decision someone stated → `record` with their words in userQuote (product/arch changes still need the user's agreement)
+  - an answer to a listed question → `respond` with the question ID
+  - anything that needs the user's call → ask the user, or `ask`
+- After recording, export again and overwrite the doc, so their edit shows up as slotboard's version.
+
 ## Wrapping up
 
-slotboard builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an implementation detail, just finish.
+With lifecycle hooks, slotboard builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an implementation detail, just finish.
+
+Without lifecycle hooks, call `checkpoint` before finishing each turn. If it returns a nudge, address any missing records and call `checkpoint({ continued: true })` to get the report. Show that report verbatim to the user; "No new findings" needs no mention. This fallback relies on you calling the tools; it cannot automatically continue a turn or display a report outside your response.
 
 The user can see everything in a browser with `slotboard web`.

@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 AI coding agents are honest in their replies, but the project state they leave behind drifts. A sync backend gets swapped inside `config.ts` without a word. A "temporary" choice becomes the default three sessions later. The TODO says done while the plan says not started. Docs pile up and none are ever retired. And when a premise changes — "our users are on Windows" turns out to be wrong — nobody goes back to the decisions that rested on it.
 
-slotboard is an MCP server plus Claude Code hooks that records each decision as a **versioned slot** with its rationale and the premises it depends on. When a premise changes, everything built on it is flagged automatically, and you get a short report at the end of the turn with the questions that need you.
+slotboard is an MCP server plus Claude Code and Codex hooks that records each decision as a **versioned slot** with its rationale and the premises it depends on. When a premise changes, everything built on it is flagged automatically, and you get a short report at the end of the turn with the questions that need you.
 
 - 🚦 **Never blocks your flow.** It flags instead of refusing. The only hard stop is the AI trying to override a product or architecture decision you made yourself.
 - 🔗 **Dependencies locked like a lockfile.** `arch/sync-backend` depends on `assum/user-os@1`. Bump the assumption and the sync decision goes stale, with a question generated from its own rationale.
@@ -35,7 +35,7 @@ slotboard writes this report itself and shows it to you directly, so the AI can'
 
 ## Quick start
 
-Requirements: Node.js 20+, git, and [Claude Code](https://claude.com/claude-code). slotboard isn't on npm yet, so build it from source:
+Requirements: Node.js 20+, git, and [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/). slotboard isn't on npm yet, so build it from source:
 
 ```bash
 git clone https://github.com/Gliese129/slotboard.git
@@ -53,6 +53,16 @@ cp /path/to/slotboard/skill/SKILL.md .claude/skills/slotboard/
 ```
 
 `init` writes the MCP server to `.mcp.json`, the hooks to `.claude/settings.json`, and creates `.project/config.json`. Start a new Claude Code session and it's live. If you leave out `--language` or `--strictness`, the AI asks you in the first session.
+
+For Codex, run this in the project you want to track:
+
+```bash
+node /path/to/slotboard/dist/cli.js init --client codex --language English --strictness balanced
+```
+
+This merges the MCP server into `.codex/config.toml`, installs the four lifecycle hooks in `.codex/hooks.json`, and copies the skill to `.agents/skills/slotboard/SKILL.md`. Existing server settings and unrelated hooks are preserved; TOML formatting and comments are rewritten. Use `--client both` to install both clients. Trust the project and review/trust the hooks in Codex, then start a new session. See [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [hooks](https://learn.chatgpt.com/docs/hooks).
+
+Codex MCP calls use their per-request `threadId` to share the hook session, including across reconnections. Without hooks, call `brief` before editing and `checkpoint` before finishing each turn; after a nudge, call `checkpoint({ continued: true })` and show the report verbatim. `brief({ prompt: "1A" })` resolves reply numbers. This fallback depends on the agent calling these tools; without a thread ID, sessions fall back to the MCP connection.
 
 For sharper "undeclared change" checks, tell slotboard which paths belong to which topic:
 
@@ -77,6 +87,8 @@ Commit `.project/events.jsonl` with your code: the state then follows branches a
 | `ask` | It needs your call while you're away. The question goes into the report. |
 | `respond` | You reply to the report (`1A`, `withdraw 2`) or answer a question. |
 | `brief` | Read-only: live decisions, stale flags, open questions, tasks. |
+| `checkpoint` | Check git changes and return the end-of-turn nudge or report when hooks are unavailable. |
+| `export` | Read-only: the same state as Markdown or JSON, for a shared team doc. |
 
 Decisions are keyed by category: `product/`, `arch/`, `platform/`, `assum/`, `dep/`, `constraint/`. Implementation details aren't recorded.
 
@@ -103,11 +115,16 @@ Change it any time with `slotboard config --strictness loose`.
 
 ```bash
 slotboard                 # run the MCP server (stdio)
-slotboard init [dir] [--language L] [--strictness S]
+slotboard init [dir] [--client claude-code|codex|both] [--language L] [--strictness S]
 slotboard config [--language L] [--strictness S]
 slotboard status          # print the brief and refresh STATUS.md
 slotboard web [--open]    # read-only local web view
+slotboard export [--format markdown|json]   # project state for a shared team doc
 ```
+
+## Sharing with your team
+
+To keep a team in the loop, ask the AI to put the project state in your shared docs (Notion, a wiki, anything it has a connector for). It calls `export` and writes the output as is, overwriting the page or each entry under its key, so the doc always matches slotboard. When a teammate comments or edits there, the AI records that in slotboard first (`record`, `respond`, or `ask`) and then exports again. slotboard stays the source of truth; this rule lives in the tool description and `SKILL.md`, so it is a convention, not an enforced sync.
 
 ## How it works
 
@@ -120,7 +137,7 @@ slotboard web [--open]    # read-only local web view
 
 v0, and it works on itself: this repo is developed with slotboard tracking it. Known gaps:
 
-- Claude Code only for now. Codex falls back to per-connection sessions; proper support is planned.
+- Automatic lifecycle checks require enabled, trusted hooks. Without them, the agent must call `brief` and `checkpoint`.
 - With two sessions in the same working tree, each one is blamed for the other's changes. Telling human edits from AI edits isn't implemented yet.
 - A task's `basedOn` can't be re-pinned after creation, so it keeps its review flag once a decision it rests on changes.
 
