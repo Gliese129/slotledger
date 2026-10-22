@@ -9,7 +9,7 @@ export const GUARDED: Category[] = ["product", "arch"];
 
 export type Actor =
   | { kind: "agent"; session: string }
-  | { kind: "human"; via?: string } // via: the session whose AI relayed it
+  | { kind: "human"; via?: string; channel?: "web" } // via: the session whose AI relayed it; channel: done directly in the web view
   | { kind: "system"; session?: string };
 
 export interface Snapshot {
@@ -38,7 +38,11 @@ export interface EventDataMap {
     replacedBy?: SlotKey;
     /** Same decision as version n of this slot, only its dependency keys were re-pointed by a merge */
     inherit?: number;
+    /** What a human did in the web view: edit the value, or keep it as is after its premise changed */
+    action?: "edit" | "keep";
   };
+  /** Removes a slot from everything the AI sees; its events stay for the audit trail */
+  "slot.deleted": { key: SlotKey; reason?: string };
   "version.confirmed": { key: SlotKey; n: number; userQuote?: string };
   "version.rejected": { key: SlotKey; n: number; reason: string; replacement?: string };
   "task.created": { slug: string; title: string; basedOn: Dep[]; rootCause?: string };
@@ -93,6 +97,10 @@ export interface Config {
   /** How much the AI is asked to record; unset until the user is asked (behaves as balanced) */
   strictness?: Strictness;
 }
+
+/** How a human shaped a version, derived from events */
+export const HUMAN_TAGS = ["human-edit", "human-approved", "human-rejected", "human-decided"] as const;
+export type HumanTag = (typeof HUMAN_TAGS)[number];
 
 export function categoryOf(key: string): Category | null {
   const c = key.split("/")[0];

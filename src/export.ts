@@ -67,7 +67,7 @@ export function buildExport(state: State, events: AnyEvent[], root: string): Exp
         depends: v.depends.map((d) => ({ ...d, current: currentN(d.key) })),
         ...(v.scope?.length ? { scope: v.scope } : {}),
         ...(v.userQuote ? { userQuote: v.userQuote } : {}),
-        history: s.versions.map((h) => ({ n: h.n, value: h.value, status: STATUS_LABEL[h.status], ...(h.retired ? { retired: true } : {}) })),
+        history: s.versions.slice(s.liveFrom).map((h) => ({ n: h.n, value: h.value, status: STATUS_LABEL[h.status], ...(h.retired ? { retired: true } : {}) })),
       };
     }),
     questions: questionsForUser(state).map((q) => ({ id: q.qid, text: q.text, about: q.about, ...(q.options?.length ? { options: q.options } : {}), askedAt: q.at })),

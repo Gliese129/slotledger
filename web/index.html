@@ -6,437 +6,641 @@
 <title>slotboard</title>
 <style>
 :root {
-  --bg: #f6f6f3; --surface: #ffffff; --surface-2: #f0f0ec; --border: #e2e2dc; --text: #1c1c1a; --muted: #6a6a64; --faint: #9a9a93;
-  --accent: #3c57c9; --accent-soft: #e8ecfb;
-  --ok: #237a3b; --ok-soft: #e3f3e7; --warn: #a65400; --warn-soft: #fdf0e1; --info: #1f6fb8; --info-soft: #e3effa; --bad: #b42323; --bad-soft: #fbe6e6;
+  --bg: #f6f6f3; --surface: #ffffff; --surface-2: #f1f1ed; --hover: #f7f7f4; --border: #e4e4de; --text: #1c1c1a; --muted: #67675f; --faint: #9b9b93;
+  --accent: #3c57c9; --accent-soft: #eaeefc;
+  --ok: #237a3b; --ok-soft: #e3f3e7; --warn: #a65400; --warn-soft: #fdf0e1; --info: #1f6fb8; --info-soft: #e3effa; --bad: #b42323; --bad-soft: #fbe7e7; --gray: #8d8d86;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.03);
+  --drawer: 520px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #131312; --surface: #1b1b1a; --surface-2: #232321; --border: #2f2f2c; --text: #ebebe7; --muted: #a2a29b; --faint: #72726c;
-    --accent: #8ea2ff; --accent-soft: #23294a;
-    --ok: #6fcf86; --ok-soft: #17301e; --warn: #f0a656; --warn-soft: #372512; --info: #72b4f0; --info-soft: #152b40; --bad: #f08080; --bad-soft: #3a1818;
-    --shadow: none;
+    --bg: #131312; --surface: #1b1b1a; --surface-2: #242422; --hover: #20201e; --border: #30302d; --text: #ebebe7; --muted: #a3a39c; --faint: #74746e;
+    --accent: #8ea2ff; --accent-soft: #232a4b;
+    --ok: #6fcf86; --ok-soft: #17301e; --warn: #f0a656; --warn-soft: #372512; --info: #72b4f0; --info-soft: #152b40; --bad: #f08080; --bad-soft: #3a1818; --gray: #7c7c76;
   }
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
-a { color: inherit; }
-code, .mono { font-family: var(--mono); font-size: .88em; }
-.wrap { max-width: 1320px; margin: 0 auto; padding: 0 32px; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
+body.open main.wrap { margin-right: calc(var(--drawer) + 24px); max-width: none; }
 
-header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
-.bar { display: flex; align-items: center; gap: 14px; height: 56px; }
-.brand { font-weight: 650; letter-spacing: -.01em; }
+/* ---------- header ---------- */
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--border); }
+.bar { display: flex; align-items: center; gap: 24px; height: 52px; }
+.brand { font-weight: 650; white-space: nowrap; }
 .brand span { color: var(--muted); font-weight: 450; }
-.live { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
-.live.off .dot { background: var(--bad); }
-#search { width: 220px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; }
-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-nav a { padding: 8px 12px 10px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; font-size: 14px; }
-nav a.on { color: var(--text); border-color: var(--accent); }
-nav a .n { margin-left: 5px; font-size: 12px; padding: 0 6px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
-nav a .n.hot { background: var(--warn-soft); color: var(--warn); }
+nav { display: flex; gap: 2px; align-self: stretch; }
+nav a { display: flex; align-items: center; padding: 0 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+nav a:hover { color: var(--text); }
+nav a.on { color: var(--text); border-color: var(--accent); font-weight: 550; }
+nav .n { margin-left: 6px; font-size: 11.5px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 9px; background: var(--surface-2); color: var(--muted); }
+nav .n.hot { background: var(--warn); color: #fff; }
+.tools { margin-left: auto; display: flex; align-items: center; gap: 16px; min-width: 0; flex: 0 1 auto; }
+#search { width: 260px; min-width: 120px; flex: 0 1 260px;padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+#search:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.live { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 12.5px; white-space: nowrap; }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.live.off i { background: var(--bad); }
 
-main { padding: 24px 0 64px; }
-h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 28px 0 10px; }
-h2:first-child { margin-top: 0; }
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
-.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); text-decoration: none; display: block; }
-.stat b { display: block; font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
-.stat small { color: var(--muted); font-size: 13px; }
-.stat.hot b { color: var(--warn); }
-.stat.bad b { color: var(--bad); }
+main { padding: 28px 0 80px; }
+.page-title { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 4px; }
+.page-sub { color: var(--muted); margin: 0 0 24px; }
+.page-sub b { color: var(--text); font-weight: 600; }
+h2 { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); margin: 28px 0 8px; }
+h2 .n { color: var(--faint); font-weight: 450; }
+h2 .more { margin-left: auto; font-weight: 450; color: var(--accent); font-size: 13px; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; align-items: start; }
+body.open .cols { grid-template-columns: 1fr; }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow); scroll-margin-top: 120px; transition: box-shadow .3s; }
-.card.flash { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent); }
-.card.dim { opacity: .65; }
-.head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
-.key { font-family: var(--mono); font-size: 13px; color: var(--muted); }
-.value { font-size: 16px; font-weight: 550; margin: 6px 0 4px; overflow-wrap: anywhere; }
-.why { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
-.quote { margin: 8px 0 0; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 6px 6px 0; font-size: 14px; overflow-wrap: anywhere; }
-.quote::before { content: "“"; } .quote::after { content: "” — user"; color: var(--muted); }
-.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; font-size: 13px; color: var(--muted); }
-.meta .lbl { color: var(--faint); }
-.pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 550; padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
-.pill.decided, .pill.verified { background: var(--ok-soft); color: var(--ok); }
-.pill.proposed, .pill.implemented, .pill.in_progress { background: var(--warn-soft); color: var(--warn); }
-.pill.accepted_by_default, .pill.todo { background: var(--info-soft); color: var(--info); }
-.pill.rejected, .pill.dropped, .pill.stale, .pill.failed { background: var(--bad-soft); color: var(--bad); }
-.pill.plain { background: var(--surface-2); color: var(--muted); }
-.chip { font-family: var(--mono); font-size: 12px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); text-decoration: none; cursor: pointer; }
-.chip:hover { border-color: var(--accent); }
-.chip.stale { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
-.right { margin-left: auto; color: var(--faint); font-size: 13px; white-space: nowrap; }
-.warn { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--bad-soft); color: var(--bad); font-size: 14px; }
-.hint { margin-top: 10px; font-size: 13px; color: var(--muted); }
-.opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.opt { border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 14px; background: var(--surface-2); }
-.opt b { font-family: var(--mono); margin-right: 6px; }
-.opt.rec { border-color: var(--ok); }
-.opt.rec::after { content: " recommended"; color: var(--ok); font-size: 12px; }
+/* ---------- rows: the outline layer ---------- */
+.list { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--border); cursor: pointer; }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--hover); }
+.row.sel { background: var(--accent-soft); }
+.row .main { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .k { font-family: var(--mono); font-size: 12px; color: var(--faint); white-space: nowrap; flex-shrink: 0; }
+.row .side { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; white-space: nowrap; }
+.row.wide .main { display: grid; grid-template-columns: 96px 190px minmax(0, 1fr); align-items: baseline; }
+.tag { font-size: 11.5px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; justify-self: start; }
+.tag.product { background: #ece6fb; color: #6741c5; }
+.tag.arch { background: #e3effa; color: #1f63a8; }
+.tag.platform { background: #e1f3ef; color: #17785f; }
+.tag.assum { background: #fdf0dc; color: #9a5a00; }
+.tag.dep { background: #eeeeea; color: #5f5f58; }
+.tag.constraint { background: #fbe7ea; color: #b02a43; }
+@media (prefers-color-scheme: dark) {
+  .tag.product { background: #2d2350; color: #b9a2f5; }
+  .tag.arch { background: #152b40; color: #7fb8ef; }
+  .tag.platform { background: #123129; color: #6fd1b4; }
+  .tag.assum { background: #372512; color: #f0b061; }
+  .tag.dep { background: #2a2a27; color: #b3b3ab; }
+  .tag.constraint { background: #3a1820; color: #f08ea0; }
+}
+.row.dim .t { color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); justify-self: center; }
+.dot.decided, .dot.verified { background: var(--ok); }
+.dot.proposed, .dot.in_progress, .dot.implemented { background: var(--warn); }
+.dot.accepted_by_default, .dot.todo { background: var(--info); }
+.dot.rejected, .dot.stale, .dot.question { background: var(--bad); }
+.dot.retired, .dot.dropped { background: transparent; border: 1.5px solid var(--gray); }
+.flag { font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 10px; line-height: 18px; }
+.flag.bad { background: var(--bad-soft); color: var(--bad); }
+.flag.warn { background: var(--warn-soft); color: var(--warn); }
+.flag.ok { background: var(--ok-soft); color: var(--ok); }
+.flag.gray { background: var(--surface-2); color: var(--muted); }
+.empty { padding: 18px 14px; color: var(--faint); }
+.dup { border-top: 1px solid var(--border); }
+.dup:first-child { border-top: 0; }
+.dup .row + .row { border-top: 1px dashed var(--border); }
+.calm { padding: 22px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); text-align: center; background: var(--surface); }
 
-details { margin-top: 10px; }
-summary { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
-.hist { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--border); }
-.hist li { position: relative; padding: 4px 0 8px 6px; font-size: 14px; }
-.hist li::before { content: ""; position: absolute; left: -20px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--faint); }
-.hist li.cur::before { border-color: var(--accent); background: var(--accent); }
-.hist .v { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
-pre { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.summary { display: flex; gap: 28px; margin: 0 0 4px; }
+.summary a { display: flex; flex-direction: column; }
+.summary b { font-size: 20px; font-weight: 650; }
+.summary small { color: var(--muted); font-size: 12.5px; }
+.summary a:hover small { color: var(--accent); }
 
-.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; align-items: center; }
-.filters button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+.filters button { font-size: 13px; padding: 3px 11px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
 .filters button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
-.filters label { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.filters label { margin-left: auto; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.group { cursor: pointer; user-select: none; }
+.group::before { content: "▾"; color: var(--faint); width: 10px; display: inline-block; }
+.group.closed::before { content: "▸"; }
 
-.cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
-.col h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; display: flex; gap: 6px; align-items: center; }
-.col h3 .n { color: var(--faint); font-weight: 450; }
-.col .card { padding: 12px; }
-.col .value { font-size: 15px; }
-.empty { color: var(--faint); font-size: 14px; padding: 12px 0; }
-.emptybig { text-align: center; color: var(--muted); padding: 32px 16px; background: var(--surface); border: 1px dashed var(--border); border-radius: 12px; }
+.day { font-size: 12px; color: var(--faint); margin: 20px 0 6px; font-weight: 600; }
+.day:first-child { margin-top: 0; }
+.ev { grid-template-columns: 14px minmax(0, 1fr) auto; }
+.ev .who { color: var(--faint); font-size: 12px; }
 
-.feed { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
-.feed li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); font-size: 14px; align-items: baseline; }
-.feed li:first-child { border-top: 0; }
-.feed .ic { text-align: center; color: var(--muted); }
-.feed .what { overflow-wrap: anywhere; }
-.feed .who { color: var(--faint); font-size: 12px; margin-left: 4px; }
-.feed .when { color: var(--faint); font-size: 12px; white-space: nowrap; }
-.day { font-size: 12px; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
-.banner { margin-bottom: 16px; padding: 10px 14px; border-radius: 10px; background: var(--bad-soft); color: var(--bad); font-size: 14px; }
-
-.split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 28px; align-items: start; }
-.split > aside { position: sticky; top: 120px; max-height: calc(100vh - 140px); overflow-y: auto; }
-.split > aside .feed li { grid-template-columns: 18px 1fr; }
-.split > aside .feed .when { grid-column: 2; }
-#search { width: 280px; }
-/* narrow desktop windows */
-@media (max-width: 1100px) { .split { grid-template-columns: 1fr; } .split > aside { position: static; max-height: none; } .cols { grid-template-columns: 1fr 1fr; } }
+/* ---------- drawer: the detail layer ---------- */
+.drawer { position: fixed; top: 53px; right: 0; bottom: 0; width: var(--drawer); background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.05); overflow-y: auto; transform: translateX(100%); transition: transform .18s ease; z-index: 4; }
+body.open .drawer { transform: none; }
+.d-head { position: sticky; top: 0; background: var(--surface); padding: 14px 20px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.d-head .k { font-family: var(--mono); font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1; color: var(--faint); cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.x:hover { background: var(--surface-2); color: var(--text); }
+.d-body { padding: 18px 20px 40px; }
+.d-title { font-size: 17px; font-weight: 600; line-height: 1.45; margin: 0 0 8px; overflow-wrap: anywhere; }
+.d-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+.d-sec { margin-top: 22px; }
+.d-sec > .lbl { font-size: 12px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.d-sec p { margin: 0; overflow-wrap: anywhere; }
+.quote { margin-top: 8px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 6px 6px 0; overflow-wrap: anywhere; }
+.quote::after { content: " — user"; color: var(--muted); font-size: 12.5px; }
+.alert { margin-top: 16px; padding: 10px 12px; border-radius: 8px; background: var(--bad-soft); color: var(--bad); }
+.alert.warn { background: var(--warn-soft); color: var(--warn); }
+.alert p + p { margin-top: 6px; }
+.mini { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mini .row { padding: 7px 10px; }
+.kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; font-size: 13px; }
+.kv dt { color: var(--faint); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.opts { display: flex; flex-direction: column; gap: 6px; }
+.opt { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.opt b { font-family: var(--mono); margin-right: 8px; }
+.opt.rec { border-color: var(--ok); }
+.hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.hist { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--border); }
+.hist li { position: relative; padding: 0 0 14px 8px; }
+.hist li::before { content: ""; position: absolute; left: -21px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--faint); }
+.hist li.cur::before { background: var(--accent); border-color: var(--accent); }
+.hist .v { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
+.hist .m { color: var(--faint); font-size: 12.5px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+pre { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; }
+/* ---------- actions ---------- */
+.acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.btn { font-size: 13px; padding: 4px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.btn.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+.btn:disabled { opacity: .5; cursor: default; }
+.row .quick { display: none; gap: 4px; }
+.row:hover .quick { display: flex; }
+.row .quick .btn { padding: 1px 9px; font-size: 12px; }
+.form { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.form label { font-size: 12px; font-weight: 600; color: var(--faint); }
+.form textarea, .form input { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; resize: vertical; }
+.form textarea:focus, .form input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.htag { font-size: 11px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px; border: 1px solid; white-space: nowrap; }
+.htag.human-edit { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.htag.human-approved, .htag.human-decided { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.htag.human-rejected { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; transition: .2s; background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 10; pointer-events: none; max-width: 520px; }
+#toast.on { opacity: 1; transform: translateX(-50%); }
+#toast.err { background: var(--bad); color: #fff; }
+.banner { margin-bottom: 18px; padding: 10px 14px; border-radius: 10px; background: var(--bad-soft); color: var(--bad); }
+@media (max-width: 960px) { .brand span { display: none; } .bar { gap: 14px; } nav a { padding: 0 8px; } .live span { display: none; } }
+@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .row.wide .main { grid-template-columns: 96px 150px minmax(0, 1fr); } body.open main.wrap { margin-right: 0; } }
 </style>
 </head>
 <body>
 <header>
-  <div class="wrap">
-    <div class="bar">
-      <div class="brand">slotboard <span id="project"></span></div>
-      <div class="live" id="live"><span class="dot"></span><span id="liveText">Connecting…</span></div>
-      <input id="search" type="search" placeholder="Search decisions, tasks…" autocomplete="off">
-    </div>
+  <div class="wrap bar">
+    <div class="brand">slotboard <span id="project"></span></div>
     <nav id="nav"></nav>
+    <div class="tools">
+      <input id="search" type="search" placeholder="Search decisions and tasks" autocomplete="off">
+      <div class="live" id="live"><i></i><span id="liveText">Connecting…</span></div>
+    </div>
   </div>
 </header>
-<main class="wrap" id="main"><div class="emptybig">Loading…</div></main>
+<main class="wrap" id="main"><div class="calm">Loading…</div></main>
+<aside class="drawer" id="drawer" aria-label="Details"></aside>
+<div id="toast" role="status"></div>
 
 <script>
 "use strict";
 const CATS = ["product", "arch", "platform", "assum", "dep", "constraint"];
 const CAT_LABEL = { product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumptions", dep: "Dependencies", constraint: "Constraints" };
-const STATUS_LABEL = { decided: "Decided", proposed: "Proposed", accepted_by_default: "Accepted by default", rejected: "Rejected" };
-const TASK_LABEL = { todo: "To do", in_progress: "In progress", implemented: "Implemented", verified: "Verified", dropped: "Dropped" };
-const TABS = [["overview", "Overview"], ["decisions", "Decisions"], ["tasks", "Tasks"], ["activity", "Activity"], ["sessions", "Sessions"]];
+const CAT_TAG = { product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumption", dep: "Dependency", constraint: "Constraint" };
+const tag = (c) => h`<span class="tag ${c}">${CAT_TAG[c] ?? c}</span>`;
+const nameOf = (key) => key.slice(key.indexOf("/") + 1);
+const STATUS = { decided: "Decided", proposed: "Proposed by AI", accepted_by_default: "Accepted by default", rejected: "Rejected", retired: "Retired", deleted: "Deleted" };
+const TASK = { in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped" };
+const TABS = [["overview", "Overview"], ["decisions", "Decisions"], ["tasks", "Tasks"], ["activity", "Activity"]];
+const ASKS = ["product", "arch", "platform", "assum"]; // categories the end-of-turn report asks about
+const TOKEN = "__SLOTBOARD_TOKEN__"; // filled in by the server; writes are refused without it
+const TAG_TIP = { "human-edit": "Edited by a person in the web view", "human-approved": "A person approved this AI proposal", "human-rejected": "A person rejected this", "human-decided": "A person decided this" };
 
-let data = null, etag = null, lastOk = 0;
-const ui = { tab: "overview", cat: "all", showOld: false, q: "", open: new Set() };
-try { Object.assign(ui, JSON.parse(localStorage.getItem("slotboard-ui") || "{}"), { open: new Set(), q: "" }); } catch {}
-const saveUi = () => { try { localStorage.setItem("slotboard-ui", JSON.stringify({ cat: ui.cat, showOld: ui.showOld })); } catch {} };
+let data = null, etag = null, lastOk = 0, D = null;
+const ui = { tab: "overview", sel: null, cat: "all", showOld: false, q: "", closed: new Set(), sessions: false };
+try { Object.assign(ui, JSON.parse(localStorage.getItem("slotboard-ui2") || "{}")); ui.closed = new Set(ui.closed || []); ui.q = ""; ui.sel = null; } catch {}
+const saveUi = () => { try { localStorage.setItem("slotboard-ui2", JSON.stringify({ cat: ui.cat, showOld: ui.showOld, closed: [...ui.closed], sessions: ui.sessions })); } catch {} };
 
 // ---------- helpers ----------
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-class Raw { constructor(s) { this.s = s; } toString() { return this.s; } }
+class Raw { constructor(s) { this.s = s; } }
 /** Tagged template: interpolations are escaped unless they are Raw (or arrays of Raw) */
 function h(strings, ...vals) {
+  const one = (x) => (x instanceof Raw ? x.s : x === false || x == null ? "" : esc(x));
   let out = strings[0];
-  vals.forEach((v, i) => {
-    const one = (x) => (x instanceof Raw ? x.s : x === false || x == null ? "" : esc(x));
-    out += (Array.isArray(v) ? v.map(one).join("") : one(v)) + strings[i + 1];
-  });
+  vals.forEach((v, i) => { out += (Array.isArray(v) ? v.map(one).join("") : one(v)) + strings[i + 1]; });
   return new Raw(out);
 }
 const short = (id) => String(id ?? "").replace(/^conn-/, "").slice(0, 8);
 function ago(iso) {
   const s = (Date.now() - new Date(iso)) / 1000;
   if (s < 45) return "just now";
-  if (s < 3600) return Math.round(s / 60) + " min ago";
-  if (s < 86400) return Math.round(s / 3600) + " h ago";
-  if (s < 86400 * 7) return Math.round(s / 86400) + " d ago";
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago";
+  if (s < 86400 * 14) return Math.round(s / 86400) + "d ago";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 const when = (iso) => h`<time datetime="${iso}" title="${new Date(iso).toLocaleString()}">${ago(iso)}</time>`;
-const match = (...parts) => !ui.q || parts.join(" ").toLowerCase().includes(ui.q.toLowerCase());
+const match = (...parts) => !ui.q || parts.flat().join(" ").toLowerCase().includes(ui.q.toLowerCase());
+const live = (s) => s.current && !s.current.retired;
 const slotOf = (k) => data.slots.find((s) => s.key === k);
 const taskOf = (slug) => data.tasks.find((t) => t.slug === slug);
-const live = (s) => s.current && !s.current.retired;
-const chip = (key, extra = "", label = key) => h`<a class="chip ${extra}" href="#decisions/${key}" data-go="${key}">${label}</a>`;
-function actor(a) {
-  if (!a) return "";
-  if (a.kind === "human") return "you" + (a.via ? " (via AI)" : "");
-  if (a.kind === "agent") return "AI";
-  return "slotboard";
-}
+const shown = (s) => s.current ?? s.versions[s.versions.length - 1];
+const slotStatus = (s) => (s.deleted ? "deleted" : !s.current ? "rejected" : s.current.retired ? "retired" : s.current.status);
+const htag = (t) => (t ? h`<span class="htag ${t}" title="${TAG_TIP[t]}">${t}</span>` : "");
+const canJudge = (v) => v && !v.retired && v.source === "agent" && !v.confirmed;
+const isSel = (type, id) => ui.sel && ui.sel.type === type && ui.sel.id === id;
+const open = (type, id) => new Raw(`data-open="${esc(type + ":" + id)}"`);
+const actor = (a) => (!a ? "" : a.kind === "human" ? (a.channel === "web" ? "you, in the web view" : "you") : a.kind === "agent" ? "AI" : "slotboard");
 
 // ---------- derived ----------
 function derive() {
-  const slots = data.slots;
   const userQs = data.questions.filter((q) => q.status === "open" && q.forUser);
-  const otherQs = data.questions.filter((q) => q.status === "open" && !q.forUser);
-  // same categories the end-of-turn report asks about
-  const proposed = slots.filter((s) => live(s) && s.current.status === "proposed" && ["product", "arch", "platform", "assum"].includes(s.category));
-  const stale = slots.filter((s) => live(s) && s.stale.length);
+  const proposed = data.slots.filter((s) => live(s) && s.current.status === "proposed" && ASKS.includes(s.category));
+  // stale ones already covered by a question for the user are not listed twice
+  const asked = new Set(userQs.flatMap((q) => (q.origin === "stale_premise" ? [q.about[0]] : [])));
+  const stale = data.slots.filter((s) => live(s) && s.stale.length && !asked.has(s.key));
   const openTasks = data.tasks.filter((t) => t.status !== "verified" && t.status !== "dropped");
-  // sessions since a proposal, for "auto-accepts after N more sessions"
+  const review = openTasks.filter((t) => t.needsReview.length);
   const starts = data.sessions.map((s) => ({ id: s.id, at: s.start.at }));
-  const laterSessions = (v) => new Set(starts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id)).size;
-  return { userQs, otherQs, proposed, stale, openTasks, laterSessions };
+  const sessionsSince = (v) => new Set(starts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id)).size;
+  return { userQs, proposed, stale, openTasks, review, sessionsSince, needs: userQs.length + stale.length + review.length };
 }
 
-// ---------- views ----------
-function decisionCard(s, d) {
-  const v = s.current;
-  const shown = v ?? s.versions[s.versions.length - 1];
-  const status = v ? (v.retired ? "retired" : v.status) : "rejected";
-  const id = "slot:" + s.key;
-  const left = v && v.status === "proposed" ? Math.max(0, data.config.acceptAfterSessions - d.laterSessions(v)) : 0;
-  const staleKeys = new Set(s.stale.map((x) => x.key));
-  return h`<div class="card ${live(s) ? "" : "dim"}" id="${s.key}">
-    <div class="head">
-      <span class="key">${s.key}</span>
-      <span class="pill ${status === "retired" ? "plain" : status}">${status === "retired" ? "Retired" : STATUS_LABEL[status]}</span>
-      ${s.stale.length ? h`<span class="pill stale">⚠ Premise changed</span>` : ""}
-      <span class="pill plain">${shown.source === "user" ? "From you" : "From AI"}</span>
-      <span class="right">v${shown.n} · ${when(shown.at)}</span>
-    </div>
-    <div class="value">${shown.value}</div>
-    <div class="why">${shown.rationale}</div>
-    ${shown.userQuote ? h`<div class="quote">${shown.userQuote}</div>` : ""}
-    ${s.stale.length ? h`<div class="warn">${s.stale.map((x) => {
-      const dep = slotOf(x.key);
-      const now = dep?.current;
-      return h`<div>Rests on ${chip(x.key, "stale")} v${x.locked}, which is now ${now ? h`v${x.current}: “${now.value}”` : "rejected"}. Does this still hold?</div>`;
-    })}</div>` : ""}
-    ${left ? h`<div class="hint">Proposed by AI. It becomes accepted by default after ${left} more session${left > 1 ? "s" : ""} unless you withdraw it.</div>` : ""}
-    <div class="meta">
-      ${shown.depends.length ? h`<span class="lbl">Depends on</span>${shown.depends.map((x) => chip(x.key, staleKeys.has(x.key) ? "stale" : "", `${x.key}@${x.n}`))}` : ""}
-      ${s.dependents.length ? h`<span class="lbl">Used by</span>${s.dependents.map((k) => chip(k))}` : ""}
-      ${tasksBasedOn(s.key).length ? h`<span class="lbl">Tasks</span>${tasksBasedOn(s.key).map((t) => h`<a class="chip" href="#tasks" data-task="${t.slug}">${t.slug}</a>`)}` : ""}
-      ${s.topics.length ? h`<span class="lbl">Topics</span>${s.topics.map((t) => h`<span class="pill plain">${t}</span>`)}` : ""}
-      ${shown.scope?.length ? h`<span class="lbl">Scope</span>${shown.scope.map((p) => h`<code>${p}</code>`)}` : ""}
-    </div>
-    ${s.versions.length > 1 ? h`<details data-id="${id}" ${ui.open.has(id) ? new Raw("open") : ""}>
-      <summary>History · ${s.versions.length} versions</summary>
-      <ul class="hist">${[...s.versions].reverse().map((x) => h`<li class="${x.n === v?.n ? "cur" : ""}">
-        <span class="v">v${x.n}</span>${x.value}${x.retired ? " (retired)" : ""}
-        <span class="pill ${x.status}">${STATUS_LABEL[x.status]}</span>
-        <div class="why">${x.rationale}</div>
-        ${x.userQuote ? h`<div class="quote">${x.userQuote}</div>` : ""}
-        <div class="hint">${x.source === "user" ? "From you" : "From AI"} · ${when(x.at)}${x.session ? h` · session <span class="mono">${short(x.session)}</span>` : ""}</div>
-      </li>`)}</ul>
-    </details>` : ""}
+// ---------- rows (outline layer) ----------
+function slotRow(s, wide = true, quick = false) {
+  const v = shown(s), st = slotStatus(s);
+  return h`<div class="row ${wide ? "wide" : ""} ${live(s) ? "" : "dim"} ${isSel("slot", s.key) ? "sel" : ""}" ${open("slot", s.key)}>
+    <span class="dot ${s.stale.length && live(s) ? "stale" : st}" title="${STATUS[st]}"></span>
+    <span class="main">${tag(s.category)}<span class="k" title="${s.key}">${nameOf(s.key)}</span><span class="t">${v.value}</span></span>
+    <span class="side">${quick && canJudge(s.current) ? h`<span class="quick"><button class="btn ok" data-act="approve" data-key="${s.key}">Approve</button><button class="btn bad" data-act="reject" data-key="${s.key}">Reject</button></span>` : ""}${s.stale.length && live(s) ? h`<span class="flag bad">premise changed</span>` : ""}${st === "proposed" ? h`<span class="flag warn">AI proposal</span>` : ""}${htag(v.tag)}${when(v.at)}</span>
   </div>`;
 }
-const tasksBasedOn = (key) => data.tasks.filter((t) => t.basedOn.some((b) => b.key === key) && t.status !== "dropped");
-
-function questionCard(q) {
-  return h`<div class="card">
-    <div class="head">
-      <span class="pill ${q.origin === "stale_premise" ? "stale" : "proposed"}">${q.origin === "stale_premise" ? "Premise changed" : "Question from AI"}</span>
-      ${q.about.map((k) => chip(k))}
-      <span class="right">${when(q.at)}</span>
-    </div>
-    <div class="value">${q.text}</div>
-    ${q.options?.length ? h`<div class="opts">${q.options.map((o) => h`<span class="opt ${o.recommended ? "rec" : ""}"><b>${o.id}</b>${o.label}</span>`)}</div>` : ""}
-    <div class="hint">Answer in your Claude Code session, e.g. “answer ${q.qid}: ${q.options?.[0]?.id ?? "…"}”.</div>
+function taskRow(t) {
+  const failed = t.lastFailed && (!t.evidence || t.lastFailed.at > t.evidence.at);
+  return h`<div class="row ${t.status === "dropped" ? "dim" : ""} ${isSel("task", t.slug) ? "sel" : ""}" ${open("task", t.slug)}>
+    <span class="dot ${t.status}" title="${TASK[t.status]}"></span>
+    <span class="main"><span class="t">${t.title}</span><span class="k">${t.slug}</span></span>
+    <span class="side">${t.needsReview.length ? h`<span class="flag bad">needs review</span>` : ""}${failed ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "verified" ? h`<span class="flag ok">verified</span>` : ""}</span>
   </div>`;
 }
-
-function taskCard(t) {
-  const id = "task:" + t.slug;
-  const ev = t.evidence, fail = t.lastFailed && (!ev || t.lastFailed.at > ev.at) ? t.lastFailed : null;
-  return h`<div class="card ${t.status === "dropped" ? "dim" : ""}" id="task-${t.slug}">
-    <div class="head"><span class="key">${t.slug}</span>${t.needsReview.length ? h`<span class="pill stale">⚠ Needs review</span>` : ""}</div>
-    <div class="value">${t.title}</div>
-    ${t.note ? h`<div class="why">${t.note}</div>` : ""}
-    ${t.rootCause ? h`<div class="why"><b>Root cause:</b> ${t.rootCause}</div>` : ""}
-    ${t.needsReview.length ? h`<div class="warn">Based on decisions that changed: ${t.needsReview.map((x) => chip(x.key, "stale"))}</div>` : ""}
-    ${t.basedOn.length ? h`<div class="meta"><span class="lbl">Based on</span>${t.basedOn.map((b) => chip(b.key, "", `${b.key}@${b.n}`))}</div>` : ""}
-    ${ev ? h`<div class="meta"><span class="pill verified">✓ Passed</span><code>${ev.cmd}</code></div><div class="hint">${ev.env} · ${when(ev.at)}</div>` : ""}
-    ${fail ? h`<div class="meta"><span class="pill failed">✗ Failed (exit ${fail.exit})</span><code>${fail.cmd}</code> <span>${when(fail.at)}</span></div>` : ""}
-    ${(ev || fail) ? h`<details data-id="${id}" ${ui.open.has(id) ? new Raw("open") : ""}><summary>Output</summary><pre>${(fail ?? ev).outputTail || "(no output)"}</pre></details>` : ""}
+function questionRow(q) {
+  return h`<div class="row ${isSel("q", q.qid) ? "sel" : ""}" ${open("q", q.qid)}>
+    <span class="dot question"></span>
+    <span class="main"><span class="t">${q.text}</span></span>
+    <span class="side"><span class="flag bad">${q.origin === "stale_premise" ? "premise changed" : "question"}</span>${when(q.at)}</span>
   </div>`;
 }
+const list = (rows, empty = "None") => (rows.length ? h`<div class="list">${rows}</div>` : h`<div class="list"><div class="empty">${empty}</div></div>`);
 
-function describe(e, nByEvent) {
-  const d = e.data, t = (slug) => taskOf(slug)?.title ?? slug;
-  switch (e.type) {
-    case "session.started": return ["▶", h`Session <span class="mono">${short(d.session)}</span> started${d.client?.name ? ` (${d.client.name}${d.client.version ? " " + d.client.version : ""})` : ""}`];
-    case "session.ended": return ["■", h`Session <span class="mono">${short(d.session)}</span> ended`];
-    case "slot.versioned": return ["◆", d.retired ? h`Retired ${chip(d.key)}` : h`${chip(d.key)} v${nByEvent.get(e.id) ?? "?"}: ${d.value}`];
-    case "version.confirmed": return ["✓", h`Confirmed ${chip(d.key)} v${d.n}`];
-    case "version.rejected": return ["↺", h`Withdrew ${chip(d.key)} v${d.n}${d.replacement ? `, replaced with “${d.replacement}”` : ""}`];
-    case "task.created": return ["+", h`New task: ${d.title}`];
-    case "task.status": return ["→", h`${t(d.slug)} → <span class="pill ${d.status}">${TASK_LABEL[d.status]}</span>${d.note ? ` ${d.note}` : ""}`];
-    case "task.verified": return ["✓", h`Verified ${t(d.slug)} with <code>${d.cmd}</code>`];
-    case "task.verify_failed": return ["✗", h`Verification failed for ${t(d.slug)} (exit ${d.exit}): <code>${d.cmd}</code>`];
-    case "question.asked": return ["?", h`Asked: ${d.text}`];
-    case "question.answered": return ["✎", h`Answered: ${d.option ? `option ${d.option}` : ""}${d.text ? ` “${d.text}”` : ""}`];
-    default: return ["·", h`${e.type}`];
-  }
-}
-function feed(events) {
-  const nByEvent = new Map(), counts = new Map();
-  for (const e of data.events) if (e.type === "slot.versioned") { const n = (counts.get(e.data.key) ?? 0) + 1; counts.set(e.data.key, n); nByEvent.set(e.id, n); }
-  let day = "";
-  const out = [];
-  let items = [];
-  const flush = () => { if (items.length) out.push(h`<ul class="feed">${items}</ul>`); items = []; };
-  for (const e of events) {
-    const dd = new Date(e.at).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-    if (dd !== day) { flush(); out.push(h`<div class="day">${dd}</div>`); day = dd; }
-    const [ic, what] = describe(e, nByEvent);
-    items.push(h`<li><span class="ic">${ic}</span><span class="what">${what}<span class="who">· ${actor(e.actor)}</span></span><span class="when">${when(e.at)}</span></li>`);
-  }
-  flush();
-  return out.length ? out : [h`<div class="emptybig">No activity yet.</div>`];
-}
-
-function overview(d) {
-  const needs = d.userQs.length + d.proposed.length;
-  const verified = data.tasks.filter((t) => t.status === "verified").length;
+// ---------- pages ----------
+function overview() {
+  const d = D;
   const liveSlots = data.slots.filter(live);
-  const recent = [...data.events].reverse().filter((e) => e.type !== "session.started" && e.type !== "session.ended").slice(0, 15);
-  return h`<div class="split"><div>
-    <div class="stats">
-      <a class="stat ${needs ? "hot" : ""}" href="#overview"><b>${needs}</b><small>need your call</small></a>
-      <a class="stat" href="#decisions"><b>${liveSlots.length}</b><small>live decisions · ${liveSlots.filter((s) => s.current.status === "decided").length} decided</small></a>
-      <a class="stat" href="#tasks"><b>${d.openTasks.length}</b><small>open tasks · ${verified} verified</small></a>
-      <a class="stat ${d.stale.length ? "bad" : ""}" href="#decisions"><b>${d.stale.length}</b><small>changed premises</small></a>
+  const recent = [...data.events].reverse().filter((e) => !e.type.startsWith("session.")).slice(0, 6);
+  const inProgress = d.openTasks.filter((t) => t.status === "in_progress" || t.status === "implemented");
+  const headline = d.needs
+    ? h`<b>${d.needs} ${d.needs === 1 ? "thing needs" : "things need"} you.</b> Everything else is moving on its own.`
+    : h`<b>Nothing needs you right now.</b>`;
+  return h`
+    <h1 class="page-title">${data.project}</h1>
+    <p class="page-sub">${headline}</p>
+    <div class="summary">
+      <a href="#decisions"><b>${liveSlots.length}</b><small>live decisions</small></a>
+      <a href="#decisions"><b>${d.proposed.length}</b><small>AI proposals</small></a>
+      <a href="#tasks"><b>${d.openTasks.length}</b><small>open tasks</small></a>
+      <a href="#tasks"><b>${data.tasks.filter((t) => t.status === "verified").length}</b><small>verified</small></a>
     </div>
-    ${d.userQs.length ? h`<h2>Questions for you</h2>${d.userQs.filter((q) => match(q.text, q.about)).map(questionCard)}` : ""}
-    ${d.proposed.length ? h`<h2>Decisions the AI made for you</h2>
-      <div class="hint" style="margin:-4px 0 10px">Each stays a proposal until you confirm it or ${data.config.acceptAfterSessions} more sessions pass. To change one, tell Claude in your session.</div>
-      ${d.proposed.filter((s) => match(s.key, s.current.value, s.current.rationale)).map((s) => decisionCard(s, d))}` : ""}
-    ${d.stale.filter((s) => s.current.status !== "proposed").length ? h`<h2>Premises that changed</h2>${d.stale.filter((s) => s.current.status !== "proposed").map((s) => decisionCard(s, d))}` : ""}
-    ${!needs && !d.stale.length ? h`<h2>Needs your call</h2><div class="emptybig">Nothing needs you right now.</div>` : ""}
-    </div><aside>
-    <h2>Recent activity</h2>${feed(recent)}
-    ${data.events.length > recent.length ? h`<div class="hint"><a href="#activity">See all activity →</a></div>` : ""}
-    </aside></div>`;
+    <div class="cols">
+      <div>
+        ${d.needs ? h`
+          ${d.userQs.length ? h`<h2>Questions for you <span class="n">${d.userQs.length}</span></h2>${list(d.userQs.map(questionRow))}` : ""}
+          ${d.stale.length ? h`<h2>Premises that changed <span class="n">${d.stale.length}</span></h2>${list(d.stale.map((s) => slotRow(s, false)))}` : ""}
+          ${d.review.length ? h`<h2>Tasks to re-check <span class="n">${d.review.length}</span></h2>${list(d.review.map(taskRow))}` : ""}`
+        : h`<h2>Needs you</h2><div class="calm">No questions, no changed premises. Proposals below become accepted on their own if you don't object.</div>`}
+        <h2>AI proposals to look over <span class="n">${d.proposed.length}</span><a class="more" href="#decisions">All decisions →</a></h2>
+        ${list(d.proposed.map((s) => slotRow(s, false, true)), "No open proposals.")}
+        ${data.duplicates?.length ? h`<h2>Possible duplicates <span class="n">${data.duplicates.length}</span></h2>
+          <div class="list">${data.duplicates.map((p) => h`<div class="dup">${[p.a, p.b].map((k) => slotRow(slotOf(k), false))}</div>`)}</div>
+          <p class="hint">These look alike. If one is the same decision as the other, ask Claude to merge them.</p>` : ""}
+      </div>
+      <div>
+        <h2>Work in progress <span class="n">${inProgress.length}</span><a class="more" href="#tasks">All tasks →</a></h2>
+        ${list(inProgress.map(taskRow), "Nothing in progress.")}
+        <h2>Recent activity<a class="more" href="#activity">All →</a></h2>
+        ${list(recent.map(evRow), "No activity yet.")}
+      </div>
+    </div>`;
 }
 
-function decisions(d) {
-  const all = data.slots.filter((s) => (ui.showOld || live(s)) && (ui.cat === "all" || s.category === ui.cat));
-  const shown = all.filter((s) => { const v = s.current ?? s.versions.at(-1); return match(s.key, v.value, v.rationale, s.topics); });
-  const count = (c) => data.slots.filter((s) => (ui.showOld || live(s)) && (c === "all" || s.category === c)).length;
-  const groups = CATS.map((c) => [c, shown.filter((s) => s.category === c).sort((a, b) => a.key.localeCompare(b.key))]).filter(([, l]) => l.length);
-  return h`<div class="filters">
+function decisions() {
+  const pool = data.slots.filter((s) => !s.deleted && (ui.showOld || live(s)));
+  const count = (c) => pool.filter((s) => c === "all" || s.category === c).length;
+  const rows = pool.filter((s) => (ui.cat === "all" || s.category === ui.cat) && match(s.key, shown(s).value, shown(s).rationale, s.topics));
+  const groups = CATS.map((c) => [c, rows.filter((s) => s.category === c).sort((a, b) => a.key.localeCompare(b.key))]).filter(([, l]) => l.length);
+  return h`
+    <h1 class="page-title">Decisions</h1>
+    <p class="page-sub">What the project has settled on. Click one for its reasons, dependencies and history.</p>
+    <div class="filters">
       ${["all", ...CATS].filter((c) => c === "all" || count(c)).map((c) => h`<button data-cat="${c}" class="${ui.cat === c ? "on" : ""}">${c === "all" ? "All" : CAT_LABEL[c]} ${count(c)}</button>`)}
       <label><input type="checkbox" id="showOld" ${ui.showOld ? new Raw("checked") : ""}> Show retired and rejected</label>
     </div>
-    ${groups.length ? groups.map(([c, l]) => h`<h2>${CAT_LABEL[c]}</h2>${l.map((s) => decisionCard(s, d))}`) : h`<div class="emptybig">${data.slots.length ? "No decisions match." : "No decisions recorded yet."}</div>`}`;
+    ${groups.length ? groups.map(([c, l]) => {
+      const closed = ui.closed.has("cat:" + c);
+      return h`<h2 class="group ${closed ? "closed" : ""}" data-toggle="cat:${c}">${CAT_LABEL[c]} <span class="n">${l.length}</span></h2>${closed ? "" : list(l.map((s) => slotRow(s)))}`;
+    }) : h`<div class="calm">${data.slots.length ? "No decisions match." : "No decisions recorded yet."}</div>`}`;
 }
 
 function tasks() {
-  const cols = ["todo", "in_progress", "implemented", "verified"];
+  const order = ["in_progress", "todo", "implemented", "verified", "dropped"];
   const ts = data.tasks.filter((t) => match(t.slug, t.title, t.note));
-  const dropped = ts.filter((t) => t.status === "dropped");
-  return h`<div class="cols">${cols.map((c) => {
-      const l = ts.filter((t) => t.status === c);
-      return h`<div class="col"><h3><span class="pill ${c}">${TASK_LABEL[c]}</span><span class="n">${l.length}</span></h3>${l.length ? l.map(taskCard) : h`<div class="empty">None</div>`}</div>`;
-    })}</div>
-    ${dropped.length ? h`<details data-id="dropped" ${ui.open.has("dropped") ? new Raw("open") : ""}><summary>Dropped · ${dropped.length}</summary><div style="margin-top:10px">${dropped.map(taskCard)}</div></details>` : ""}`;
+  return h`
+    <h1 class="page-title">Tasks</h1>
+    <p class="page-sub">Work only counts as verified after slotboard runs a command that proves it.</p>
+    ${order.map((st) => {
+      const l = ts.filter((t) => t.status === st);
+      if (!l.length) return "";
+      // dropped starts collapsed, so for it the stored key means "opened"
+      const key = st === "dropped" ? "task:dropped:open" : "task:" + st;
+      const closed = st === "dropped" ? !ui.closed.has(key) : ui.closed.has(key);
+      return h`<h2 class="group ${closed ? "closed" : ""}" data-toggle="${key}">${TASK[st]} <span class="n">${l.length}</span></h2>${closed ? "" : list(l.map(taskRow))}`;
+    })}
+    ${ts.length ? "" : h`<div class="calm">${data.tasks.length ? "No tasks match." : "No tasks yet."}</div>`}`;
 }
 
-function sessions() {
-  const list = [...data.sessions].sort((a, b) => (a.start.at < b.start.at ? 1 : -1));
-  if (!list.length) return h`<div class="emptybig">No sessions yet.</div>`;
-  return list.map((s) => {
-    const done = data.events.filter((e) => (e.actor.session ?? e.actor.via) === s.id && (e.type === "task.verified" || (e.type === "task.status" && e.data.status === "implemented")));
-    return h`<div class="card">
-      <div class="head"><span class="key">${short(s.id)}</span>
-        <span class="pill ${s.end ? "plain" : "verified"}">${s.end ? "Ended" : "Open"}</span>
-        <span class="pill plain">${s.client.name}${s.client.version ? " " + s.client.version : ""}</span>
-        <span class="right">${new Date(s.start.at).toLocaleString()}</span></div>
-      <div class="meta">
-        ${s.wrote.length ? h`<span class="lbl">Decisions</span>${s.wrote.map((k) => chip(k))}` : h`<span>No decisions recorded</span>`}
-        ${done.length ? h`<span class="lbl">Work</span>${[...new Set(done.map((e) => e.data.slug))].map((slug) => h`<a class="chip" href="#tasks" data-task="${slug}">${slug}</a>`)}` : ""}
+// ---------- activity ----------
+let versionNo = new Map();
+function numberVersions() {
+  versionNo = new Map();
+  const c = new Map();
+  for (const e of data.events) if (e.type === "slot.versioned") { const n = (c.get(e.data.key) ?? 0) + 1; c.set(e.data.key, n); versionNo.set(e.id, n); }
+}
+function describe(e) {
+  const d = e.data, t = (slug) => taskOf(slug)?.title ?? slug;
+  switch (e.type) {
+    case "session.started": return ["plain", ["slot", null], `Session ${short(d.session)} started`];
+    case "session.ended": return ["plain", ["slot", null], `Session ${short(d.session)} ended`];
+    case "slot.versioned": return [d.retired ? "retired" : "decided", ["slot", d.key], d.retired ? `Retired ${d.key}${d.replacedBy ? `, merged into ${d.replacedBy}` : ""}` : d.action === "edit" ? `Edited ${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}` : d.action === "keep" ? `Kept ${d.key} after its premise changed` : `${d.key} v${versionNo.get(e.id) ?? "?"}: ${d.value}`];
+    case "slot.deleted": return ["deleted", ["slot", d.key], `Deleted ${d.key}`];
+    case "version.confirmed": return ["decided", ["slot", d.key], `Approved ${d.key} v${d.n}`];
+    case "version.rejected": return ["rejected", ["slot", d.key], `Rejected ${d.key} v${d.n}${d.replacement ? `, replaced with “${d.replacement}”` : ""}`];
+    case "task.created": return ["todo", ["task", d.slug], `New task: ${d.title}`];
+    case "task.status": return [d.status, ["task", d.slug], `${t(d.slug)} → ${TASK[d.status] ?? d.status}`];
+    case "task.verified": return ["verified", ["task", d.slug], `Verified ${t(d.slug)}`];
+    case "task.verify_failed": return ["rejected", ["task", d.slug], `Check failed for ${t(d.slug)} (exit ${d.exit})`];
+    case "question.asked": return ["question", ["q", d.qid], `Asked: ${d.text}`];
+    case "question.answered": return ["decided", ["q", d.qid], `Answered ${d.option ? `option ${d.option}` : `“${d.text ?? ""}”`}`];
+    default: return ["plain", ["slot", null], e.type];
+  }
+}
+function evRow(e) {
+  const [dot, [type, id], text] = describe(e);
+  return h`<div class="row ev ${id && isSel(type, id) ? "sel" : ""}" ${id ? open(type, id) : ""}>
+    <span class="dot ${dot}"></span>
+    <span class="main"><span class="t">${text}</span><span class="who">${actor(e.actor)}</span></span>
+    <span class="side">${when(e.at)}</span>
+  </div>`;
+}
+function activity() {
+  const evs = [...data.events].reverse().filter((e) => (ui.sessions || !e.type.startsWith("session.")) && match(JSON.stringify(e.data)));
+  const out = [];
+  let day = "", rows = [];
+  const flush = () => { if (rows.length) out.push(list(rows)); rows = []; };
+  for (const e of evs) {
+    const dd = new Date(e.at).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    if (dd !== day) { flush(); out.push(h`<div class="day">${dd}</div>`); day = dd; }
+    rows.push(evRow(e));
+  }
+  flush();
+  return h`
+    <h1 class="page-title">Activity</h1>
+    <p class="page-sub">Everything recorded, newest first. ${data.sessions.length} sessions so far.</p>
+    <div class="filters"><label style="margin-left:0"><input type="checkbox" id="sessions" ${ui.sessions ? new Raw("checked") : ""}> Show session starts and ends</label></div>
+    ${out.length ? out : h`<div class="calm">No activity yet.</div>`}`;
+}
+
+function searchPage() {
+  const slots = data.slots.filter((s) => !s.deleted && match(s.key, shown(s).value, shown(s).rationale, s.topics));
+  const ts = data.tasks.filter((t) => match(t.slug, t.title, t.note));
+  return h`
+    <h1 class="page-title">Results for “${ui.q}”</h1>
+    <p class="page-sub">${slots.length} decisions, ${ts.length} tasks</p>
+    <h2>Decisions <span class="n">${slots.length}</span></h2>${list(slots.map((s) => slotRow(s)), "No matching decisions.")}
+    <h2>Tasks <span class="n">${ts.length}</span></h2>${list(ts.map(taskRow), "No matching tasks.")}`;
+}
+
+// ---------- drawer (detail layer) ----------
+function sec(label, body) { return body ? h`<div class="d-sec"><div class="lbl">${label}</div>${body}</div>` : ""; }
+function slotDetail(s) {
+  const v = shown(s), st = slotStatus(s);
+  const left = v.status === "proposed" && live(s) ? Math.max(0, data.config.acceptAfterSessions - D.sessionsSince(v)) : 0;
+  const staleKeys = new Set(s.stale.map((x) => x.key));
+  const deps = v.depends.map((x) => slotOf(x.key)).filter(Boolean);
+  const users = s.dependents.map(slotOf).filter(Boolean);
+  const tasksOn = data.tasks.filter((t) => t.basedOn.some((b) => b.key === s.key) && t.status !== "dropped");
+  const q = data.questions.find((q) => q.status === "open" && q.origin === "stale_premise" && q.about[0] === s.key);
+  return h`
+    <div class="d-head">${tag(s.category)}<span class="k">${nameOf(s.key)}</span><button class="x" data-close title="Close (Esc)">×</button></div>
+    <div class="d-body">
+      <div class="d-title">${v.value}</div>
+      <div class="d-status">
+        <span class="flag ${st === "decided" ? "ok" : st === "proposed" ? "warn" : st === "rejected" || st === "deleted" ? "bad" : "gray"}">${STATUS[st]}</span>${htag(v.tag)}
+        <span>${st === "proposed" ? "" : v.source === "user" ? "from you · " : "from AI · "}v${v.n} · ${when(v.at)}</span>
       </div>
-      ${s.start.snapshot?.head ? h`<div class="hint">Started at commit <code>${s.start.snapshot.head.slice(0, 7)}</code>${s.end?.snapshot?.head && s.end.snapshot.head !== s.start.snapshot.head ? h`, ended at <code>${s.end.snapshot.head.slice(0, 7)}</code>` : ""}</div>` : ""}
+      ${s.stale.length && live(s) ? h`<div class="alert">${s.stale.map((x) => {
+        const now = slotOf(x.key)?.current;
+        return h`<p>It rests on <b>${x.key}</b> v${x.locked}, which is now ${now ? (now.retired ? "retired" : h`v${x.current}: “${now.value}”`) : slotOf(x.key)?.deleted ? "deleted" : "rejected"}.</p>`;
+      })}<p>${q && q.forUser ? "Waiting for your answer: does it still hold?" : "The AI should review whether it still holds."}</p></div>` : ""}
+      ${s.deleted ? h`<div class="alert"><p>You deleted this ${when(s.deleted.at)}. The AI doesn't see it any more, and the key can be used again.</p></div>` : ""}
+      ${slotActions(s)}
+      ${v.replacedBy ? h`<div class="alert warn"><p>Merged into <a href="#${ui.tab}/slot/${v.replacedBy}"><b>${v.replacedBy}</b></a>; it is kept only for history.</p></div>` : ""}
+      ${left ? h`<div class="alert warn"><p>Proposed by the AI. It becomes accepted by default after ${left} more session${left > 1 ? "s" : ""} unless you object. To change it, tell Claude in your session.</p></div>` : ""}
+      ${sec("Why", h`<p>${v.rationale}</p>${v.userQuote ? h`<div class="quote">${v.userQuote}</div>` : ""}`)}
+      ${sec("Rests on", deps.length ? h`<div class="mini">${deps.map((d) => slotRow(d, false))}</div>` : "")}
+      ${sec("Decisions built on it", users.length ? h`<div class="mini">${users.map((d) => slotRow(d, false))}</div>` : "")}
+      ${sec("Tasks based on it", tasksOn.length ? h`<div class="mini">${tasksOn.map(taskRow)}</div>` : "")}
+      ${sec("Details", h`<dl class="kv">
+        ${s.topics.length ? h`<dt>Topics</dt><dd>${s.topics.join(", ")}</dd>` : ""}
+        ${v.scope?.length ? h`<dt>Scope</dt><dd>${v.scope.map((p) => h`<code>${p}</code> `)}</dd>` : ""}
+        ${v.session ? h`<dt>Session</dt><dd class="mono">${short(v.session)}</dd>` : ""}
+      </dl>`)}
+      ${s.versions.length > 1 ? sec(`History · ${s.versions.length} versions`, h`<ul class="hist">${[...s.versions].reverse().map((x) => h`<li class="${x.n === v.n ? "cur" : ""}">
+        <div><span class="v">v${x.n}</span>${x.value}${x.retired ? " (retired)" : ""}</div>
+        <div class="m">${STATUS[x.status]} · ${x.source === "user" ? "from you" : "from AI"} · ${when(x.at)}</div>
+        ${x.n !== v.n ? h`<details><summary>Why</summary><p class="hint">${x.rationale}</p>${x.userQuote ? h`<div class="quote">${x.userQuote}</div>` : ""}</details>` : ""}
+      </li>`)}</ul>`) : ""}
     </div>`;
-  });
+}
+function taskDetail(t) {
+  const ev = t.evidence, fail = t.lastFailed && (!ev || t.lastFailed.at > ev.at) ? t.lastFailed : null;
+  const log = data.events.filter((e) => e.data?.slug === t.slug).reverse();
+  const based = t.basedOn.map((b) => slotOf(b.key)).filter(Boolean);
+  return h`
+    <div class="d-head"><span class="dot ${t.status}"></span><span class="k">${t.slug}</span><button class="x" data-close title="Close (Esc)">×</button></div>
+    <div class="d-body">
+      <div class="d-title">${t.title}</div>
+      <div class="d-status"><span class="flag ${t.status === "verified" ? "ok" : t.status === "dropped" ? "gray" : "warn"}">${TASK[t.status]}</span>${t.note ? h`<span>${t.note}</span>` : ""}</div>
+      ${t.needsReview.length ? h`<div class="alert"><p>Decisions it's based on changed: ${t.needsReview.map((x) => x.key).join(", ")}. Check it should still be done.</p></div>` : ""}
+      ${t.rootCause ? sec("Root cause", h`<p>${t.rootCause}</p>`) : ""}
+      ${sec("Verification", ev || fail ? h`
+        ${ev ? h`<p><span class="flag ok">passed</span> <code>${ev.cmd}</code></p><p class="hint">${ev.env} · ${when(ev.at)}</p>` : ""}
+        ${fail ? h`<p style="margin-top:8px"><span class="flag bad">failed, exit ${fail.exit}</span> <code>${fail.cmd}</code></p><p class="hint">${when(fail.at)}</p>` : ""}
+        <details><summary>Command output</summary><pre>${(fail ?? ev).outputTail || "(no output)"}</pre></details>` : h`<p class="hint">Not verified yet.</p>`)}
+      ${sec("Based on", based.length ? h`<div class="mini">${based.map((s) => slotRow(s, false))}</div>` : "")}
+      ${sec("History", h`<ul class="hist">${log.map((e) => h`<li><div>${describe(e)[2]}</div><div class="m">${actor(e.actor)} · ${when(e.at)}</div></li>`)}</ul>`)}
+    </div>`;
+}
+function questionDetail(q) {
+  const about = q.about.map(slotOf).filter(Boolean);
+  return h`
+    <div class="d-head"><span class="dot question"></span><span class="k">${q.qid}</span><button class="x" data-close title="Close (Esc)">×</button></div>
+    <div class="d-body">
+      <div class="d-title">${q.text}</div>
+      <div class="d-status"><span class="flag ${q.status === "open" ? "bad" : "ok"}">${q.status === "open" ? "Waiting for you" : "Answered"}</span><span>${when(q.at)}</span></div>
+      ${q.options?.length ? sec("Options", h`<div class="opts">${q.options.map((o) => h`<div class="opt ${o.recommended ? "rec" : ""}"><b>${o.id}</b>${o.label}${o.recommended ? h` <span class="flag ok">recommended</span>` : ""}</div>`)}</div>`) : ""}
+      ${q.status === "open" ? sec("Answer", h`
+        ${q.options?.length ? h`<div class="acts" style="margin-top:0">${q.options.map((o) => h`<button class="btn ${o.recommended ? "primary" : ""}" data-act="answer" data-q="${q.qid}" data-choice="${o.id}">${o.id}: ${o.label}</button>`)}</div>` : ""}
+        <div class="form"><input id="f-answer" placeholder="${q.options?.length ? "Or answer in your own words" : "Your answer"}" value="${draft("f-answer", "")}"><div class="acts" style="margin-top:0"><button class="btn" data-act="answer" data-q="${q.qid}">Send answer</button></div></div>
+        <p class="hint">Or tell Claude in your session, e.g. <code>answer ${q.qid}: ${q.options?.[0]?.id ?? "…"}</code>.</p>`) : ""}
+      ${sec("About", about.length ? h`<div class="mini">${about.map((s) => slotRow(s, false))}</div>` : "")}
+    </div>`;
+}
+
+// ---------- actions ----------
+const form = { edit: null, reject: null, draft: {} }; // key whose edit / reject form is open in the drawer, and what's typed so far
+const draft = (id, fallback) => form.draft[id] ?? fallback;
+function slotActions(s) {
+  if (s.deleted) return "";
+  const v = s.current;
+  if (form.edit === s.key && v) return h`<div class="form" data-form="edit">
+      <label for="f-value">Value</label><textarea id="f-value" rows="3">${draft("f-value", v.value)}</textarea>
+      <label for="f-why">Why</label><textarea id="f-why" rows="3">${draft("f-why", v.rationale)}</textarea>
+      <div class="acts"><button class="btn primary" data-act="edit" data-key="${s.key}">Save</button><button class="btn ghost" data-cancel>Cancel</button></div>
+    </div>`;
+  if (form.reject === s.key) return h`<div class="form">
+      <label for="f-reason">Why reject it? (optional; the AI sees this)</label><input id="f-reason" placeholder="e.g. we never ship on Linux" value="${draft("f-reason", "")}">
+      <div class="acts"><button class="btn bad" data-act="reject" data-key="${s.key}" data-confirmed="1">Reject</button><button class="btn ghost" data-cancel>Cancel</button></div>
+      <p class="hint">Rejecting tells the AI this was wrong. If you'd rather it simply forgot the idea, delete it instead.</p>
+    </div>`;
+  const live_ = v && !v.retired;
+  return h`<div class="acts">
+    ${canJudge(v) ? h`<button class="btn ok" data-act="approve" data-key="${s.key}">Approve</button><button class="btn bad" data-act="reject" data-key="${s.key}">Reject…</button>` : ""}
+    ${live_ && s.stale.length ? h`<button class="btn ok" data-act="keep" data-key="${s.key}" title="Its premise changed but it still holds">Still holds</button>` : ""}
+    ${live_ ? h`<button class="btn" data-act="open-edit" data-key="${s.key}">Edit</button>` : ""}
+    <button class="btn ghost" data-act="delete" data-key="${s.key}">Delete</button>
+  </div>`;
+}
+
+let toastTimer = 0;
+function toast(msg, err = false) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "on" + (err ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = err ? "err" : ""; }, err ? 5000 : 2600);
+}
+async function act(body) {
+  try {
+    const r = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-Slotboard-Token": TOKEN }, body: JSON.stringify(body) });
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(res.error || `Failed (${r.status})`);
+    toast(res.message || "Done");
+    return true;
+  } catch (err) {
+    toast(err.message, true);
+    return false;
+  } finally {
+    etag = null; // fetch the new state right away
+    clearTimeout(pollTimer);
+    poll();
+  }
+}
+async function onAct(btn) {
+  const { act: a, key } = btn.dataset;
+  if (a === "open-edit") { form.edit = key; form.reject = null; render(); document.getElementById("f-value")?.focus(); return; }
+  if (a === "reject" && !btn.dataset.confirmed && ui.sel?.id === key) { form.reject = key; form.edit = null; render(); document.getElementById("f-reason")?.focus(); return; }
+  if (a === "delete" && !confirm(`Delete ${key}?\n\nThe AI won't see it any more and the key can be reused. It stays in the activity log.`)) return;
+  btn.disabled = true;
+  const body = { action: a, key };
+  if (a === "edit") { body.value = document.getElementById("f-value").value; body.rationale = document.getElementById("f-why").value; }
+  if (a === "reject") body.reason = document.getElementById("f-reason")?.value ?? "";
+  if (a === "answer") { body.question = btn.dataset.q; body.choice = btn.dataset.choice || undefined; body.text = btn.dataset.choice ? undefined : document.getElementById("f-answer")?.value; }
+  const ok = await act(body);
+  if (ok) {
+    form.edit = form.reject = null;
+    form.draft = {};
+    if (a === "delete" && ui.sel?.id === key) go(null);
+    else document.getElementById("drawer").scrollTop = 0;
+  }
+  btn.disabled = false;
 }
 
 // ---------- render ----------
 function render() {
   if (!data) return;
-  const d = derive();
+  D = derive();
+  numberVersions();
   document.getElementById("project").textContent = "· " + data.project;
   document.title = `${data.project} · slotboard`;
-  const badge = { overview: [d.userQs.length + d.proposed.length, true], decisions: [data.slots.filter(live).length], tasks: [d.openTasks.length], activity: [data.events.length], sessions: [data.sessions.length] };
+  const badge = { overview: [D.needs, true], decisions: [data.slots.filter(live).length], tasks: [D.openTasks.length], activity: [0] };
   document.getElementById("nav").innerHTML = TABS.map(([id, label]) => {
     const [n, hot] = badge[id];
-    return h`<a href="#${id}" class="${ui.tab === id ? "on" : ""}">${label}${n ? h`<span class="n ${hot ? "hot" : ""}">${n}</span>` : ""}</a>`;
+    return h`<a href="#${id}" class="${ui.tab === id && !ui.q ? "on" : ""}">${label}${n ? h`<span class="n ${hot ? "hot" : ""}">${n}</span>` : ""}</a>`.s;
   }).join("");
-  const body = { overview, decisions, tasks, activity: () => feed([...data.events].reverse().filter((e) => match(JSON.stringify(e.data)))), sessions }[ui.tab](d);
-  const banner = data.errors ? h`<div class="banner">⚠ slotboard failed to sync ${data.errors} time(s); some records may be missing. See <code>.project/run/errors.log</code>.</div>` : "";
+  const page = ui.q ? searchPage() : { overview, decisions, tasks, activity }[ui.tab]();
+  const banner = data.errors ? h`<div class="banner">⚠ slotboard failed to sync ${data.errors} time(s); some records may be missing (.project/run/errors.log).</div>` : "";
   const y = window.scrollY;
-  document.getElementById("main").innerHTML = h`${banner}${body}`.s;
+  document.getElementById("main").innerHTML = h`${banner}${page}`.s;
   window.scrollTo(0, y);
+
+  const drawer = document.getElementById("drawer");
+  const item = ui.sel && (ui.sel.type === "slot" ? slotOf(ui.sel.id) : ui.sel.type === "task" ? taskOf(ui.sel.id) : data.questions.find((q) => q.qid === ui.sel.id));
+  document.body.classList.toggle("open", !!item);
+  // a live update must not wipe what someone is typing in the drawer
+  if (drawer.contains(document.activeElement) && /^(TEXTAREA|INPUT)$/.test(document.activeElement.tagName)) return;
+  const dy = drawer.scrollTop;
+  drawer.innerHTML = item ? (ui.sel.type === "slot" ? slotDetail(item) : ui.sel.type === "task" ? taskDetail(item) : questionDetail(item)).s : "";
+  drawer.scrollTop = dy;
 }
 
 function route() {
-  const [tab, ...rest] = location.hash.slice(1).split("/");
+  const [tab, type, ...rest] = decodeURIComponent(location.hash.slice(1)).split("/");
   const next = TABS.some(([id]) => id === tab) ? tab : "overview";
   const switched = next !== ui.tab;
+  const prevSel = ui.sel && ui.sel.type + ":" + ui.sel.id;
   ui.tab = next;
+  ui.sel = type && rest.length ? { type, id: rest.join("/") } : null;
+  if (!ui.sel || ui.sel.id !== form.edit) form.edit = null;
+  if (!ui.sel || ui.sel.id !== form.reject) form.reject = null;
+  if (!form.edit && !form.reject) form.draft = {};
   render();
-  const target = rest.join("/");
-  if (target) focus(document.getElementById(target));
-  else if (switched) window.scrollTo(0, 0);
+  if (switched) window.scrollTo(0, 0);
+  if (ui.sel && prevSel !== ui.sel.type + ":" + ui.sel.id) document.getElementById("drawer").scrollTop = 0;
 }
-function focus(el) {
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
-  el.classList.add("flash");
-  setTimeout(() => el.classList.remove("flash"), 1400);
-}
+const go = (sel) => { location.hash = ui.tab + (sel ? `/${sel.type}/${sel.id}` : ""); };
 
 document.addEventListener("click", (e) => {
-  const go = e.target.closest("[data-go]");
-  if (go) {
-    e.preventDefault();
-    const key = go.dataset.go;
-    const s = slotOf(key);
-    if (s && !live(s)) ui.showOld = true;
-    if (s && ui.cat !== "all" && ui.cat !== s.category) ui.cat = "all";
-    if (location.hash === "#decisions/" + key) route(); else location.hash = "decisions/" + key;
-    return;
+  const t = e.target;
+  const btn = t.closest("[data-act]");
+  if (btn) { e.stopPropagation(); return onAct(btn); }
+  if (t.closest("[data-cancel]")) { form.edit = form.reject = null; form.draft = {}; return render(); }
+  const o = t.closest("[data-open]");
+  if (o) {
+    const [type, ...id] = o.dataset.open.split(":");
+    if (ui.q) { ui.q = ""; document.getElementById("search").value = ""; ui.tab = type === "task" ? "tasks" : "decisions"; }
+    return go({ type, id: id.join(":") });
   }
-  const task = e.target.closest("[data-task]");
-  if (task) {
-    e.preventDefault();
-    ui.tab = "tasks";
-    history.pushState(null, "", "#tasks");
-    render();
-    focus(document.getElementById("task-" + task.dataset.task));
-    return;
-  }
-  const cat = e.target.closest("[data-cat]");
-  if (cat) { ui.cat = cat.dataset.cat; saveUi(); render(); }
+  if (t.closest("[data-close]")) return go(null);
+  const cat = t.closest("[data-cat]");
+  if (cat) { ui.cat = cat.dataset.cat; saveUi(); return render(); }
+  const tg = t.closest("[data-toggle]");
+  if (tg) { const k = tg.dataset.toggle; ui.closed.has(k) ? ui.closed.delete(k) : ui.closed.add(k); saveUi(); return render(); }
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "showOld") { ui.showOld = e.target.checked; saveUi(); render(); }
+  if (e.target.id === "sessions") { ui.sessions = e.target.checked; saveUi(); render(); }
 });
-document.addEventListener("toggle", (e) => {
-  const id = e.target.dataset?.id;
-  if (id) e.target.open ? ui.open.add(id) : ui.open.delete(id);
-}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && ui.sel) go(null);
+  if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); document.getElementById("search").focus(); }
+});
+document.addEventListener("input", (e) => { if (/^f-/.test(e.target.id)) form.draft[e.target.id] = e.target.value; });
 document.getElementById("search").addEventListener("input", (e) => { ui.q = e.target.value.trim(); render(); });
 window.addEventListener("hashchange", route);
 
@@ -456,11 +660,12 @@ async function poll() {
   } catch {
     setLive(false);
   }
-  setTimeout(poll, document.hidden ? 10000 : 2000);
+  pollTimer = setTimeout(poll, document.hidden ? 10000 : 2000);
 }
+let pollTimer = 0;
 function setLive(ok) {
   document.getElementById("live").classList.toggle("off", !ok);
-  document.getElementById("liveText").textContent = ok ? "Live" : lastOk ? "Disconnected · retrying" : "Can't reach slotboard web";
+  document.getElementById("liveText").textContent = ok ? "Live" : lastOk ? "Reconnecting…" : "Can't reach slotboard web";
 }
 setInterval(() => document.querySelectorAll("time[datetime]").forEach((t) => { t.textContent = ago(t.getAttribute("datetime")); }), 30000);
 poll();

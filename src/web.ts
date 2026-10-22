@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { basename, join } from "node:path";
 import { slotTopics } from "./analyze.js";
-import type { Board } from "./board.js";
+import { FixableError, HUMAN_ACTIONS, type Board, type HumanAction } from "./board.js";
 import { dependentsOf } from "./fold.js";
 import { questionsForUser } from "./report.js";
+import { duplicatePairs } from "./similar.js";
 
 const PAGE = new URL("../web/index.html", import.meta.url);
 
@@ -33,6 +35,7 @@ export function webState(board: Board) {
     tasks: [...state.tasks.values()],
     questions: [...state.questions.values()].map((q) => ({ ...q, forUser: forUser.has(q.qid) })),
     sessions: [...state.sessions.values()],
+    duplicates: duplicatePairs(state).map((d) => ({ a: d.a.key, b: d.b.key })),
     events,
   };
 }
@@ -42,13 +45,67 @@ export interface WebOptions {
   host?: string;
 }
 
-/** Read-only local server. With no explicit port, walks forward from the default until one is free. */
-export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server: Server; url: string }> {
+const MAX_BODY = 64 * 1024;
+
+function readBody(req: import("node:http").IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY) { reject(new FixableError("Request too large.")); req.destroy(); } else chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Local server for the page. Writes need the token baked into the served page and a localhost Host header,
+ * so other websites open in the same browser can't post actions to it (CSRF, DNS rebinding).
+ * With no explicit port, walks forward from the default until one is free.
+ */
+export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server: Server; url: string; token: string }> {
   const host = opts.host ?? "127.0.0.1";
-  const server = createServer((req, res) => {
+  const token = randomBytes(18).toString("base64url");
+  const json = (res: import("node:http").ServerResponse, code: number, body: unknown) =>
+    res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body));
+  const localHost = (h: string | undefined) => {
+    const p = (server.address() as { port: number } | null)?.port;
+    return !!h && [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`].includes(h);
+  };
+
+  const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url ?? "/", "http://x").pathname;
-      if (req.method !== "GET" && req.method !== "HEAD") {
+      if (!localHost(req.headers.host)) {
+        res.writeHead(421, { "Content-Type": "text/plain" }).end("slotboard web only answers on localhost");
+      } else if (req.method === "POST" && path === "/api/action") {
+        const origin = req.headers.origin;
+        if (req.headers["x-slotboard-token"] !== token || (origin && origin !== `http://${req.headers.host}`)) {
+          json(res, 403, { error: "This page is out of date; reload it." });
+          return;
+        }
+        if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+          json(res, 415, { error: "Expected JSON." });
+          return;
+        }
+        let input: HumanAction;
+        try { input = JSON.parse(await readBody(req)); } catch (err) {
+          json(res, 400, { error: err instanceof FixableError ? err.message : "Malformed request." });
+          return;
+        }
+        if (!input || !(HUMAN_ACTIONS as readonly string[]).includes(input.action)) {
+          json(res, 400, { error: "Unknown action." });
+          return;
+        }
+        try {
+          json(res, 200, { message: board.human(input) });
+        } catch (err) {
+          if (err instanceof FixableError) json(res, 400, { error: err.message });
+          else throw err;
+        }
+      } else if (req.method !== "GET" && req.method !== "HEAD") {
         res.writeHead(405).end();
       } else if (path === "/api/state") {
         const etag = stateVersion(board);
@@ -60,7 +117,7 @@ export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server:
         res.end(JSON.stringify(webState(board)));
       } else if (path === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-        res.end(readFileSync(PAGE));
+        res.end(readFileSync(PAGE, "utf8").replace("__SLOTBOARD_TOKEN__", token));
       } else {
         res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
       }
@@ -80,7 +137,7 @@ export function startWeb(board: Board, opts: WebOptions = {}): Promise<{ server:
     server.on("listening", () => {
       const addr = server.address();
       const p = typeof addr === "object" && addr ? addr.port : port;
-      resolve({ server, url: `http://${host === "0.0.0.0" ? "localhost" : host}:${p}/` });
+      resolve({ server, url: `http://${host === "0.0.0.0" ? "localhost" : host}:${p}/`, token });
     });
     server.listen(port, host);
   });

@@ -27,7 +27,7 @@ export function live(state: State): SlotState[] {
 }
 
 function staleNote(s: SlotState): string {
-  return s.stale.length ? ` ⚠ premise changed: ${s.stale.map((d) => `${d.key} v${d.locked}→v${d.current}`).join(", ")}` : "";
+  return s.stale.length ? ` ⚠ premise changed: ${s.stale.map((d) => `${d.key} v${d.locked}→${d.current ? `v${d.current}` : "gone"}`).join(", ")}` : "";
 }
 
 export function openQuestions(state: State): QuestionState[] {
@@ -97,7 +97,7 @@ function briefLine(s: SlotState): string {
   const v = s.current!;
   const deps = v.depends.length ? ` · depends on ${v.depends.map((d) => `${d.key}@${d.n}`).join(", ")}` : "";
   const scope = v.scope?.length ? ` · scope ${v.scope.join(", ")}` : "";
-  return `${s.key} v${v.n} "${v.value}" (${STATUS_LABEL[v.status]})${deps}${scope}${staleNote(s)}`;
+  return `${s.key} v${v.n} "${v.value}" (${STATUS_LABEL[v.status]}${v.tag ? `, ${v.tag}` : ""})${deps}${scope}${staleNote(s)}`;
 }
 
 /** brief({ query }): the slots and tasks that best match, including retired slots so an old key can be reused */
@@ -165,11 +165,12 @@ export function renderStatusMd(state: State): string {
     out.push("(none)");
   }
 
-  const history = [...state.slots.values()].filter((s) => s.versions.length > 1 || s.current?.retired || !s.current);
+  // deleted slots and versions from before a delete are left out, since the AI reads this file too
+  const history = [...state.slots.values()].filter((s) => !s.deleted && (s.versions.length - s.liveFrom > 1 || s.current?.retired || !s.current));
   if (history.length) {
     out.push("", "## Change history", "");
     for (const s of history) {
-      out.push(`- ${s.key}: ` + s.versions.map((v) => `v${v.n} "${esc(v.value)}"${v.retired ? " (retired)" : ""}${v.status === "rejected" ? " (rejected)" : ""}`).join(" → "));
+      out.push(`- ${s.key}: ` + s.versions.slice(s.liveFrom).map((v) => `v${v.n} "${esc(v.value)}"${v.retired ? " (retired)" : ""}${v.status === "rejected" ? " (rejected)" : ""}`).join(" → "));
     }
   }
   return out.join("\n") + "\n";

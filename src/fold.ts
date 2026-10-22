@@ -1,5 +1,5 @@
 import { shortHash } from "./store.js";
-import type { AnyEvent, Category, Config, Dep, Evidence, QOption, SlotKey, Snapshot, TaskStatus } from "./types.js";
+import type { AnyEvent, Category, Config, Dep, Evidence, HumanTag, QOption, SlotKey, Snapshot, TaskStatus } from "./types.js";
 import { categoryOf } from "./types.js";
 
 export type VersionStatus = "proposed" | "decided" | "accepted_by_default" | "rejected";
@@ -22,6 +22,8 @@ export interface VersionState {
   confirmed: boolean;
   rejected?: { reason: string };
   status: VersionStatus;
+  /** Set when a human made, approved, or rejected this version */
+  tag?: HumanTag;
 }
 
 export interface StaleDep {
@@ -37,6 +39,10 @@ export interface SlotState {
   versions: VersionState[];
   current?: VersionState;
   stale: StaleDep[];
+  /** Index of the first version after the latest delete; earlier versions are history only */
+  liveFrom: number;
+  /** Set while the slot is deleted; recording the key again revives it with the next version number */
+  deleted?: { at: string };
 }
 
 export interface TaskState {
@@ -120,9 +126,10 @@ export function fold(events: AnyEvent[], config: Config): State {
         if (!cat) break;
         let slot = slots.get(d.key);
         if (!slot) {
-          slot = { key: d.key, category: cat, topics: [], versions: [], stale: [] };
+          slot = { key: d.key, category: cat, topics: [], versions: [], stale: [], liveFrom: 0 };
           slots.set(d.key, slot);
         }
+        if (slot.deleted) { slot.deleted = undefined; slot.topics = []; }
         for (const t of d.topics ?? []) if (!slot.topics.includes(t)) slot.topics.push(t);
         // a re-pointed copy keeps who decided it, whether it was confirmed, and how long it has stood
         const prev = d.inherit ? slot.versions[d.inherit - 1] : undefined;
@@ -143,6 +150,7 @@ export function fold(events: AnyEvent[], config: Config): State {
           eventId: ev.id,
           confirmed: prev?.confirmed ?? false,
           status: "proposed",
+          ...(prev?.tag ? { tag: prev.tag } : ev.actor.kind === "human" && ev.actor.channel === "web" && d.action === "edit" ? { tag: "human-edit" as const } : source === "user" ? { tag: "human-decided" as const } : {}),
         });
         if (sid) {
           const s = sessions.get(sid);
@@ -152,12 +160,20 @@ export function fold(events: AnyEvent[], config: Config): State {
       }
       case "version.confirmed": {
         const v = slots.get(ev.data.key)?.versions[ev.data.n - 1];
-        if (v) v.confirmed = true;
+        if (v) {
+          v.confirmed = true;
+          if (v.source === "agent") v.tag = "human-approved";
+        }
         break;
       }
       case "version.rejected": {
         const v = slots.get(ev.data.key)?.versions[ev.data.n - 1];
-        if (v) v.rejected = { reason: ev.data.reason };
+        if (v) { v.rejected = { reason: ev.data.reason }; v.tag = "human-rejected"; }
+        break;
+      }
+      case "slot.deleted": {
+        const slot = slots.get(ev.data.key);
+        if (slot && !slot.deleted) { slot.deleted = { at: ev.at }; slot.liveFrom = slot.versions.length; }
         break;
       }
       case "task.created": {
@@ -203,7 +219,7 @@ export function fold(events: AnyEvent[], config: Config): State {
         v.status = later.size >= config.acceptAfterSessions ? "accepted_by_default" : "proposed";
       }
     }
-    slot.current = [...slot.versions].reverse().find((v) => v.status !== "rejected");
+    slot.current = slot.versions.slice(slot.liveFrom).reverse().find((v) => v.status !== "rejected");
   }
 
   const currentN = (k: SlotKey) => slots.get(k)?.current?.n ?? 0;
@@ -224,7 +240,7 @@ export function fold(events: AnyEvent[], config: Config): State {
         ? newV.retired
           ? `was retired (it was "${oldV?.value ?? "?"}")`
           : `changed from "${oldV?.value ?? "?"}" to "${newV.value}"`
-        : "was rejected";
+        : depSlot?.deleted ? "was deleted" : "was rejected";
       questions.set(qid, {
         qid,
         about: [slot.key, dep.key],

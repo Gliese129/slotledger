@@ -346,3 +346,91 @@ describe("finding and merging keys", () => {
     expect(board.brief("nothing like this")).toContain("Nothing matches");
   });
 });
+
+describe("human actions in the web view", () => {
+  it("approve and reject AI proposals, tagged human-approved / human-rejected", () => {
+    start("s1");
+    board.record("s1", { key: "product/autostart", value: "On by default", rationale: "Convenient" });
+    board.record("s1", { key: "product/tray-icon", value: "Show a tray icon", rationale: "Discoverable" });
+    expect(board.human({ action: "approve", key: "product/autostart" })).toContain("Approved");
+    board.human({ action: "reject", key: "product/tray-icon", reason: "No tray on macOS" });
+    const { state } = board.load();
+    const a = state.slots.get("product/autostart")!.current!;
+    expect([a.status, a.tag]).toEqual(["decided", "human-approved"]);
+    const t = state.slots.get("product/tray-icon")!;
+    expect(t.current).toBeUndefined();
+    expect(t.versions[0].tag).toBe("human-rejected");
+    expect(board.brief()).toContain("(decided, human-approved)");
+    expect(() => board.human({ action: "reject", key: "product/autostart" })).toThrow(FixableError);
+  });
+
+  it("edit writes a user version tagged human-edit; a user decision via the AI is human-decided", () => {
+    seedWindowsWorld();
+    expect(board.load().state.slots.get("arch/sync-backend")!.current!.tag).toBe("human-decided");
+    board.human({ action: "edit", key: "arch/sync-backend", value: "iCloud", rationale: "Mac users" });
+    const v = board.load().state.slots.get("arch/sync-backend")!.current!;
+    expect([v.n, v.value, v.source, v.tag]).toEqual([2, "iCloud", "user", "human-edit"]);
+    expect(v.depends).toEqual([{ key: "assum/user-os", n: 1 }]);
+  });
+
+  it("keep confirms a decision whose premise changed, as human-decided", () => {
+    seedWindowsWorld();
+    start("s2");
+    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
+    board.human({ action: "keep", key: "arch/sync-backend" });
+    const s = board.load().state.slots.get("arch/sync-backend")!;
+    expect(s.stale).toEqual([]);
+    expect(s.current!.tag).toBe("human-decided");
+  });
+
+  it("delete hides the slot from everything the AI sees; the key starts over cleanly", () => {
+    seedWindowsWorld();
+    board.human({ action: "delete", key: "platform/target-os" });
+    const brief = board.brief();
+    expect(brief).not.toContain("platform/target-os");
+    expect(board.brief("windows")).not.toContain("platform/target-os");
+    expect(readFileSync(join(root, "STATUS.md"), "utf8")).not.toContain("Windows 10+");
+    // the AI can use the key again without being told what was there; numbering continues so old locks go stale
+    const msg = board.record("s1", { key: "platform/target-os", value: "macOS 13+", rationale: "Mac users" });
+    expect(msg).toContain("Recorded platform/target-os v2");
+    expect(msg).not.toContain("Windows 10+");
+    expect(board.load().state.slots.get("platform/target-os")!.versions.length).toBe(2);
+  });
+
+  it("dependents of a deleted slot are flagged", () => {
+    seedWindowsWorld();
+    board.human({ action: "delete", key: "assum/user-os" });
+    const q = [...board.load().state.questions.values()].find((q) => q.about[0] === "arch/sync-backend")!;
+    expect(q.text).toContain("assum/user-os, which it depends on, was deleted");
+  });
+
+  it("answers a question from the web", () => {
+    seedWindowsWorld();
+    start("s2");
+    board.record("s2", { key: "assum/user-os", value: "macOS", rationale: "Correction", userQuote: "it's actually macOS" });
+    const q = [...board.load().state.questions.values()].find((q) => q.about[0] === "arch/sync-backend")!;
+    expect(board.human({ action: "answer", question: q.qid, choice: "A" })).toContain("still holds");
+    expect(board.load().state.slots.get("arch/sync-backend")!.stale).toEqual([]);
+  });
+
+  it("the action endpoint needs the page token and a localhost Host", async () => {
+    start("s1");
+    board.record("s1", { key: "product/autostart", value: "On by default", rationale: "Convenient" });
+    const { server, url, token } = await startWeb(board, { port: 0 });
+    try {
+      expect(await (await fetch(url)).text()).toContain(token);
+      const post = (headers: Record<string, string>, body: unknown = { action: "approve", key: "product/autostart" }) =>
+        fetch(url + "api/action", { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+      expect((await post({})).status).toBe(403);
+      expect((await post({ "X-Slotboard-Token": token, Origin: "https://evil.example" })).status).toBe(403);
+      expect((await post({ "X-Slotboard-Token": token }, { action: "drop-table" })).status).toBe(400);
+      const ok = await post({ "X-Slotboard-Token": token });
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).message).toContain("Approved");
+      const bad = await post({ "X-Slotboard-Token": token }, { action: "edit", key: "product/nope", value: "x" });
+      expect([bad.status, (await bad.json()).error]).toEqual([400, "product/nope doesn't exist any more."]);
+    } finally {
+      server.close();
+    }
+  });
+});

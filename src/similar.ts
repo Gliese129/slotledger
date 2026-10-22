@@ -99,7 +99,7 @@ export function search(state: State, query: string, limit = 10): { slots: SlotSt
       .map((r) => r.x);
   return {
     // live slots first; retired ones still show up so an old key can be revived
-    slots: rank([...state.slots.values()], slotText, (s) => (s.current && !s.current.retired ? 0.25 : 0)),
+    slots: rank([...state.slots.values()].filter((s) => !s.deleted), slotText, (s) => (s.current && !s.current.retired ? 0.25 : 0)),
     tasks: rank([...state.tasks.values()], (t) => `${t.slug} ${t.slug.replace(/-/g, " ")} ${t.title} ${t.note ?? ""}`, (t) => (t.status === "dropped" ? 0 : 0.25)),
   };
 }

@@ -118,7 +118,7 @@ slotboard                 # 运行 MCP server（stdio）
 slotboard init [dir] [--client claude-code|codex|both] [--language L] [--strictness S]
 slotboard config [--language L] [--strictness S]
 slotboard status          # 打印 brief 并刷新 STATUS.md
-slotboard web [--open]    # 只读的本地网页
+slotboard web [--open]    # 本地网页：查看、批准、否决、编辑、删除
 slotboard export [--format markdown|json]   # 导出项目状态，给团队共享文档用
 ```
 

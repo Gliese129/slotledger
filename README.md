@@ -13,7 +13,7 @@ slotboard is an MCP server plus Claude Code and Codex hooks that records each de
 - 🕵️ **Catches decisions hidden in code.** A git snapshot diff is mapped to your topics, so "changed `src/sync/**` but recorded nothing" gets noticed.
 - ✅ **Evidence, not claims.** `verify` runs the command itself and keeps the exit code and output. Nothing is "done" until it passes.
 - 💬 **One-line answers.** Reply `1A` or `withdraw 2`; the AI records it with your exact words.
-- 📜 **Append-only history.** One event log is the source of truth; status, staleness and questions are all derived from it. Read it as `STATUS.md` or in a local web view.
+- 📜 **Append-only history.** One event log is the source of truth; status, staleness and questions are all derived from it. Read it as `STATUS.md` or in a local web view, where you can also approve, reject, edit or delete decisions yourself.
 - 🌐 **Your language, your strictness.** On setup the AI asks which language to keep records in and how much to record.
 
 ## What you see at the end of a turn
@@ -118,7 +118,7 @@ slotboard                 # run the MCP server (stdio)
 slotboard init [dir] [--client claude-code|codex|both] [--language L] [--strictness S]
 slotboard config [--language L] [--strictness S]
 slotboard status          # print the brief and refresh STATUS.md
-slotboard web [--open]    # read-only local web view
+slotboard web [--open]    # local web view: review, approve, reject, edit, delete
 slotboard export [--format markdown|json]   # project state for a shared team doc
 ```
 

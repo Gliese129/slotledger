@@ -51,6 +51,22 @@ export interface RespondInput {
   userQuote: string;
 }
 
+export const HUMAN_ACTIONS = ["edit", "delete", "approve", "reject", "keep", "answer"] as const;
+
+/** Something a person did directly in the web view */
+export interface HumanAction {
+  action: (typeof HUMAN_ACTIONS)[number];
+  key?: string;
+  value?: string;
+  rationale?: string;
+  reason?: string;
+  question?: string;
+  choice?: string;
+  text?: string;
+}
+
+const WEB: Actor = { kind: "human", channel: "web" };
+
 export interface Client {
   name: string;
   version: string;
@@ -268,9 +284,8 @@ export class Board {
 
   // ---------- respond ----------
 
-  respond(session: string, input: RespondInput): string {
+  respond(session: string, input: RespondInput, via: Actor = { kind: "human", via: session }): string {
     const { state } = this.load();
-    const via: Actor = { kind: "human", via: session };
     let qid = input.question;
     let decision: { key: SlotKey; n: number } | undefined;
 
@@ -376,6 +391,67 @@ export class Board {
       ...(repointed.length ? [`Re-pointed ${repointed.length} decision(s) that depended on them to ${key}: ${repointed.join(", ")}. Their values are unchanged; if the merged value changes what they rest on, review them.`] : []),
       ...(tasks.length ? [`Tasks based on the retired slots now need review: ${tasks.map((t) => t.slug).join(", ")}.`] : []),
     ];
+  }
+
+  // ---------- Human actions (web view) ----------
+
+  /** Apply an action a person took in the web view. Throws FixableError with a message meant for that person. */
+  human(input: HumanAction): string {
+    const { state } = this.load();
+    if (input.action === "answer") {
+      const q = input.question ? state.questions.get(input.question) : undefined;
+      if (!q || q.status !== "open") throw new FixableError("That question isn't open any more.");
+      const said = input.text?.trim() || (input.choice ? `${input.choice} (${q.options?.find((o) => o.id === input.choice)?.label ?? ""})` : "");
+      return this.respond("", { question: q.qid, choice: input.choice, text: input.text?.trim() || undefined, userQuote: `Answered in the web view: ${said}` }, WEB);
+    }
+
+    const slot = input.key ? state.slots.get(input.key as SlotKey) : undefined;
+    if (!slot || slot.deleted) throw new FixableError(`${input.key ?? "That decision"} doesn't exist any more.`);
+    const cur = slot.current;
+    let out: string;
+    switch (input.action) {
+      case "delete":
+        this.store.append("slot.deleted", WEB, { key: slot.key, ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}) });
+        out = `Deleted ${slot.key}. The AI won't see it any more; the key is free to use again.`;
+        break;
+      case "edit": {
+        if (!cur || cur.retired) throw new FixableError(`${slot.key} isn't live, so there's nothing to edit.`);
+        const value = input.value?.trim();
+        if (!value) throw new FixableError("The value can't be empty.");
+        const rationale = input.rationale?.trim() || cur.rationale;
+        if (value === cur.value && rationale === cur.rationale) return `${slot.key} is unchanged.`;
+        this.store.append("slot.versioned", WEB, {
+          key: slot.key, value, rationale, depends: this.relock(state, cur.depends), topics: [], ...(cur.scope ? { scope: cur.scope } : {}), action: "edit",
+        });
+        out = `Saved ${slot.key} v${slot.versions.length + 1}.`;
+        break;
+      }
+      case "keep": {
+        if (!cur || !slot.stale.length) throw new FixableError(`${slot.key} has no changed premise to confirm.`);
+        this.store.append("slot.versioned", WEB, {
+          key: slot.key, value: cur.value, rationale: `${cur.rationale} (still holds after ${slot.stale.map((d) => d.key).join(", ")} changed)`,
+          depends: this.relock(state, cur.depends), topics: [], ...(cur.scope ? { scope: cur.scope } : {}), action: "keep",
+        });
+        out = `Kept ${slot.key} as it is.`;
+        break;
+      }
+      case "approve":
+        if (!cur || cur.retired) throw new FixableError(`${slot.key} isn't live.`);
+        if (cur.source === "user" || cur.confirmed) return `${slot.key} is already decided.`;
+        this.store.append("version.confirmed", WEB, { key: slot.key, n: cur.n });
+        out = `Approved ${slot.key}.`;
+        break;
+      case "reject":
+        if (!cur || cur.retired) throw new FixableError(`${slot.key} isn't live.`);
+        if (cur.source === "user" || cur.confirmed) throw new FixableError(`${slot.key} is already decided; edit or delete it instead.`);
+        this.store.append("version.rejected", WEB, { key: slot.key, n: cur.n, reason: input.reason?.trim() || "Rejected in the web view." });
+        out = `Rejected ${slot.key} v${cur.n}.`;
+        break;
+      default:
+        throw new FixableError(`Unknown action ${input.action}.`);
+    }
+    this.writeStatus();
+    return out;
   }
 
   private relock(state: State, deps: Dep[]): Dep[] {
