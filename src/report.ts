@@ -1,6 +1,6 @@
 import type { Analysis } from "./analyze.js";
-import type { QuestionState, SlotState, State, VersionState } from "./fold.js";
-import type { AnyEvent, Category, SlotKey } from "./types.js";
+import type { QuestionState, SlotState, State, TaskState, VersionState } from "./fold.js";
+import type { AnyEvent, Category, Evidence, SlotKey } from "./types.js";
 import type { Config, Strictness } from "./types.js";
 import { CATEGORIES, GUARDED } from "./types.js";
 import { settingsBrief } from "./settings.js";
@@ -14,8 +14,38 @@ export const STATUS_LABEL: Record<VersionState["status"], string> = {
 };
 
 export const CAT_LABEL: Record<Category, string> = {
-  product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumption", dep: "Dependency", constraint: "Constraint",
+  goal: "Goal", approach: "Approach", env: "Environment", assum: "Assumption", dep: "Dependency", constraint: "Constraint",
 };
+
+const day = (s: string) => s.slice(0, 16).replace("T", " ");
+
+/** One piece of evidence, naming its source: run (slotboard ran it), ref (produced elsewhere), human (a person's acceptance) */
+export function describeEvidence(e: Evidence & { at: string }, passed: boolean): string {
+  switch (e.kind) {
+    case "ref": {
+      const refs = e.refs.map((r) => r.target + (r.sha256 ? ` (sha256 ${r.sha256.slice(0, 12)})` : r.missing ? " (file not found)" : "")).join(", ");
+      const metrics = e.metrics ? "; " + Object.entries(e.metrics).map(([k, v]) => `${k}=${v}`).join(", ") : "";
+      return `ref: ${passed ? "reported passing" : "reported failing"}, ${e.summary} [${refs}${metrics}] (${day(e.at)})`;
+    }
+    case "human":
+      return `human: ${passed ? "accepted" : "not accepted"}, "${e.userQuote}"${e.scope ? `, covers ${e.scope}` : ""} (${day(e.at)})`;
+    default:
+      return passed ? `run: \`${e.cmd}\` passed (${e.env}, ${day(e.at)})` : `run: \`${e.cmd}\` failed, exit ${e.exit} (${day(e.at)})`;
+  }
+}
+
+/** What backs a task's status: the latest pass, or the latest failure when it came after. A pass from before decisions changed is history, not the current state */
+export function verificationLine(t: TaskState): string {
+  if (t.lastFailed && (!t.evidence || t.lastFailed.at > t.evidence.at)) return `last check failed: ${describeEvidence(t.lastFailed, false)}`;
+  if (t.evidence) return (t.status === "needs_review" ? "passed before decisions changed: " : "") + describeEvidence(t.evidence, true);
+  return "not verified";
+}
+
+/** The three ways out of needs_review, for the AI */
+export function reviewHint(t: TaskState): string {
+  return `${t.slug} needs review: ${t.needsReview.map((d) => (d.locked === d.current ? `${d.key} has a changed premise` : `${d.key} v${d.locked}→${d.current ? `v${d.current}` : "gone"}`)).join(", ")}. ` +
+    `Pick one: re-verify it (a pass re-locks basedOn); confirm it still holds with task({ slug: "${t.slug}", basedOn: [${t.basedOn.map((d) => `"${d.key}"`).join(", ")}], note: "<why>" }); or drop it with status dropped.`;
+}
 
 const MAX_LIST = 3;
 /** Above this many live decisions, brief lists assumptions and dependencies by key only */
@@ -34,7 +64,7 @@ export function openQuestions(state: State): QuestionState[] {
   return [...state.questions.values()].filter((q) => q.status === "open");
 }
 
-/** What a human must answer: questions the AI asked, plus stale-premise questions on arch/product; the AI reviews the other categories itself */
+/** What a human must answer: questions the AI asked, plus stale-premise questions on goal/approach; the AI reviews the other categories itself */
 export function questionsForUser(state: State): QuestionState[] {
   return openQuestions(state).filter((q) => q.origin === "agent" || (q.premise && GUARDED.includes(state.slots.get(q.premise.slot)!.category)));
 }
@@ -79,14 +109,14 @@ export function renderBrief(state: State, config: Config, errors = 0): string {
   if (tasks.length) {
     lines.push("", "## Tasks");
     for (const t of tasks) {
-      const review = t.needsReview.length ? ` ⚠ based on changed decisions: ${t.needsReview.map((d) => d.key).join(", ")}` : "";
+      const review = t.status === "needs_review" ? ` (changed: ${t.needsReview.map((d) => d.key).join(", ")})` : "";
       lines.push(`- ${t.slug} [${t.status}] ${t.title}${review}`);
     }
   }
 
   lines.push(
     "",
-    "Use record when you make or change a decision; task when you start or advance work; verify to run a command before claiming something is done; respond when the user replies to numbers in a report.",
+    "Use record when you make or change a decision; task when you start or advance work; verify with evidence (a command, a reference, or the user's acceptance) before claiming something is done; respond when the user replies to numbers in a report.",
     "Before adding a new key, look for an existing one with brief({ query }); reuse or merge instead of adding near-duplicates.",
     "Keep plans, todos, and decisions here; don't write separate PLAN/TODO/handoff documents.",
   );
@@ -157,8 +187,8 @@ export function renderStatusMd(state: State): string {
   if (tasks.length) {
     out.push("| Task | Status | Verification |", "|---|---|---|");
     for (const t of tasks) {
-      const ev = t.evidence ? `\`${esc(t.evidence.cmd)}\` passed (${esc(t.evidence.env)}, ${date(t.evidence.at)})` : t.lastFailed ? `last verification failed (exit ${t.lastFailed.exit})` : "not verified";
-      const review = t.needsReview.length ? " ⚠ needs review" : "";
+      const ev = esc(verificationLine(t));
+      const review = t.status === "needs_review" ? ` (${t.needsReview.map((d) => d.key).join(", ")} changed)` : "";
       out.push(`| ${esc(t.title)} | ${t.status}${review} | ${ev} |`);
     }
   } else {
@@ -199,9 +229,12 @@ export interface Report {
 function sessionCompletions(events: AnyEvent[], session: string): string[] {
   const done = new Map<string, string>();
   for (const ev of events) {
-    const sid = ev.actor.kind === "agent" ? ev.actor.session : ev.actor.kind === "system" ? ev.actor.session : undefined;
+    const sid = ev.actor.kind === "human" ? ev.actor.via : ev.actor.session;
     if (sid !== session) continue;
-    if (ev.type === "task.verified") done.set(ev.data.slug, ` (verified on ${ev.data.env})`);
+    if (ev.type === "task.verified") {
+      const e = ev.data;
+      done.set(e.slug, e.kind === "ref" ? " (verified by reference)" : e.kind === "human" ? " (accepted by the user)" : ` (verified on ${e.env})`);
+    }
     if (ev.type === "task.status" && ev.data.status === "implemented" && !done.has(ev.data.slug)) done.set(ev.data.slug, " (not verified)");
   }
   return [...done].map(([slug, note]) => `${slug}${note}`);
@@ -215,7 +248,7 @@ export function buildReport(state: State, events: AnyEvent[], session: string, a
   }
   const decisions = live(state).filter((s) => {
     const v = s.current!;
-    return v.session === session && v.status === "proposed" && ["product", "arch", "platform", "assum"].includes(s.category);
+    return v.session === session && v.status === "proposed" && ["goal", "approach", "env", "assum"].includes(s.category);
   });
   for (const s of decisions) {
     const v = s.current!;
@@ -271,7 +304,7 @@ export function buildNudge(state: State, analysis: Analysis | null, strictness: 
       parts.push({ key: `topic:${u.topic}`, text: `Files in topic ${u.topic} changed (${u.files.slice(0, 3).join(", ")}${u.files.length > 3 ? ", …" : ""}), but no related decision was recorded.` });
     }
     if (analysis.schemaUndeclared.length) {
-      parts.push({ key: `schema:${analysis.schemaUndeclared.join(",")}`, text: `Schema/migration/interface files changed (${analysis.schemaUndeclared.slice(0, 3).join(", ")}), but nothing was recorded under arch.` });
+      parts.push({ key: `schema:${analysis.schemaUndeclared.join(",")}`, text: `Schema/migration/interface files changed (${analysis.schemaUndeclared.slice(0, 3).join(", ")}), but nothing was recorded under approach.` });
     }
     for (const d of analysis.newDocs) {
       parts.push({ key: `doc:${d}`, text: `New document ${d}. If it holds decisions, plans, or todos, record them with record / task (the document itself can stay).` });
@@ -282,8 +315,8 @@ export function buildNudge(state: State, analysis: Analysis | null, strictness: 
     parts.push({ key: `stale:${s.key}@${s.current!.n}`, text: `The premise of ${s.key} "${s.current!.value}" changed${staleNote(s).replace(" ⚠ premise changed", "")}. Review it: if it still holds, record the same value (this locks the new dependency versions); otherwise change it.` });
   }
   for (const t of state.tasks.values()) {
-    if (t.needsReview.length && t.status !== "dropped" && t.status !== "verified") {
-      parts.push({ key: `task:${t.slug}:${t.needsReview.map((d) => `${d.key}@${d.current}`).join(",")}`, text: `Decisions that task ${t.slug} is based on changed (${t.needsReview.map((d) => d.key).join(", ")}). Check it should still be done; if not, mark it dropped with task.` });
+    if (t.status === "needs_review") {
+      parts.push({ key: `task:${t.slug}:${t.needsReview.map((d) => `${d.key}@${d.current}`).join(",")}`, text: reviewHint(t) });
     }
     if (strictness === "strict" && t.status === "implemented") {
       parts.push({ key: `unverified:${t.slug}`, text: `Task ${t.slug} is implemented but not verified. Run verify with a command that proves it works, or say why it can't be verified yet.` });

@@ -8,10 +8,11 @@ AI 编程助手在回复里很诚实，但它留下的项目状态会悄悄走�
 
 slotboard 是一个 MCP server，加上一组 Claude Code / Codex hooks。它把每个决定记成**带版本的槽位**，写明理由和依赖的前提。前提一变，依赖它的决定会被自动标出来；每个回合结束时，你会收到一份简短的汇报，列出需要你拍板的问题。
 
-- 🚦 **不打断工作流。** 只标记，不拒绝。唯一会真正停下的情况：AI 想推翻你亲口定过的产品或架构决定。
-- 🔗 **像 lockfile 一样锁定依赖。** `arch/sync-backend` 依赖 `assum/user-os@1`。假设一升版本，同步方案就被标为前提已变，并用它自己的理由生成一个问题。
+- 🚦 **不打断工作流。** 只标记，不拒绝。唯一会真正停下的情况：AI 想推翻你亲口定过的目标或做法决定。
+- 🔗 **像 lockfile 一样锁定依赖。** `approach/sync-backend` 依赖 `assum/user-os@1`。假设一升版本，同步方案就被标为前提已变，并用它自己的理由生成一个问题。
 - 🕵️ **揪出藏在代码里的决定。** 用 git 快照比对改动，再映射到你配置的主题，"改了 `src/sync/**` 却什么都没记"会被发现。
-- ✅ **看证据，不听声称。** `verify` 由 slotboard 自己执行命令，留下退出码和输出。没跑通就不算完成。
+- ✅ **看证据，不听声称。** `verify` 由 slotboard 自己执行命令，留下退出码和输出。命令验不了的工作（评测报告、真机检查）记成带 hash 的引用，或人用原话给出的验收，并始终标明来源。没有证据就不算完成。
+- 🧪 **不只用于写代码。** 分类按决定的作用命名（目标、做法、环境……），研究、写作、规划项目也用同一套前提、复查和汇报。
 - 💬 **一句话回复。** 回 `1A` 或 `撤回 2`，AI 会连同你的原话一起记下。
 - 📜 **只追加的历史。** 一份事件日志是唯一的真实数据，状态、过期标记、问题都从它推算。可以看 `STATUS.md`，也可以打开本地网页。
 - 🌐 **语言和严格度由你定。** 安装时 AI 会先问你：记录用什么语言、记多细。
@@ -20,12 +21,12 @@ slotboard 是一个 MCP server，加上一组 Claude Code / Codex hooks。它把
 
 ```
 Needs your call (1; related work is paused)
-1. arch/sync-backend is currently "OneDrive" because: users are all on Windows, which ships OneDrive.
+1. approach/sync-backend is currently "OneDrive" because: users are all on Windows, which ships OneDrive.
    But assum/user-os, which it depends on, changed from "users are all on Windows" to "users are on macOS".
    Does this decision still hold? (A Still holds, keep it / B Needs a new decision) Just reply "1A".
 
 Decisions I made for you (1; you can withdraw any of them)
-2. platform/target-os: macOS 13+ (follows the user's OS)
+2. env/target-os: macOS 13+ (follows the user's OS)
 If you disagree, reply "withdraw 2".
 
 Everything else is done: config-dir-macos (verified on darwin 25.1.0 arm64, node v22.23.0)
@@ -83,14 +84,25 @@ Codex MCP 请求通过 `threadId` 和 hooks 共用会话，重连后也能沿用
 |---|---|
 | `record` | 做出或改变一个决定。同一个 key 再记一次就是升版本。 |
 | `task` | 开始、推进或放弃一项工作，用 slug 引用。 |
-| `verify` | 声称某样东西能用之前。由 slotboard 执行命令并留存证据。 |
+| `verify` | 声称某样东西能用之前，附一种证据：slotboard 自己执行的命令（run）、别处产生的证据如报告或作业 ID（ref，本地文件会算 hash）、人用原话给出的验收（human）。 |
 | `ask` | 你不在时需要你拍板，问题会进汇报。 |
 | `respond` | 你回复了汇报（`1A`、`撤回 2`）或回答了问题。 |
 | `brief` | 只读：生效的决定、过期标记、待回答问题、任务。 |
 | `checkpoint` | 没有 hooks 时检查 git 改动，返回回合结束提醒或报告。 |
 | `export` | 只读：同样的状态，导出成 Markdown 或 JSON，给团队共享文档用。 |
 
-决定按分类命名：`product/`、`arch/`、`platform/`、`assum/`、`dep/`、`constraint/`。实现细节不记。
+决定按分类命名，分类按作用而不是领域划分，适用于各种项目：
+
+| 分类 | 记什么 | 软件 | 研究、写作 |
+|---|---|---|---|
+| `goal/` | 要什么、怎样算成功 | 默认行为 | 研究问题、成功判据、读者 |
+| `approach/` | 怎么做 | 架构、数据格式 | 目标函数、实验方案、结构 |
+| `env/` | 被什么环境绑定 | 目标系统、运行时 | 集群、判题器版本、投稿格式 |
+| `assum/` | 依赖的事实 | 用户的系统 | 数据重叠、已有结果 |
+| `dep/` | 用到的外部东西 | 库 | 数据集、模型、文献 |
+| `constraint/` | 限制，需写明范围 | 不能动的代码 | 预算、字数 |
+
+旧名 `product/`、`arch/`、`platform/` 仍然可用，分别等同 `goal/`、`approach/`、`env/`；旧日志不需要迁移。执行细节不记。
 
 ## Hooks
 
@@ -105,9 +117,9 @@ Codex MCP 请求通过 `threadId` 和 hooks 共用会话，重连后也能沿用
 
 | 档位 | 记什么 | 回合结束时的检查 |
 |---|---|---|
-| `strict` | product、arch、platform、assum | 每个发现提醒一次，停在 implemented 没 verify 的任务也会被提醒 |
-| `balanced`（默认） | product、arch、platform，以及它们依赖的假设 | 每个发现提醒一次 |
-| `loose` | 只记 product 和 arch | 不打断 AI，发现只出现在汇报里 |
+| `strict` | goal、approach、env、assum | 每个发现提醒一次，停在 implemented 没 verify 的任务也会被提醒 |
+| `balanced`（默认） | goal、approach、env，以及它们依赖的假设 | 每个发现提醒一次 |
+| `loose` | 只记 goal 和 approach | 不打断 AI，发现只出现在汇报里 |
 
 随时可以改：`slotboard config --strictness loose`。
 

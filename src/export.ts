@@ -1,6 +1,6 @@
 import { basename } from "node:path";
-import type { State, TaskState } from "./fold.js";
-import { CAT_LABEL, STATUS_LABEL, live, questionsForUser } from "./report.js";
+import type { State } from "./fold.js";
+import { CAT_LABEL, STATUS_LABEL, live, questionsForUser, verificationLine } from "./report.js";
 import type { AnyEvent, Category, Dep, QOption, SlotKey } from "./types.js";
 
 export const EXPORT_FORMATS = ["markdown", "json"] as const;
@@ -41,12 +41,6 @@ export interface Export {
 
 const date = (s: string) => s.slice(0, 16).replace("T", " ") + " UTC";
 
-function verification(t: TaskState): string {
-  if (t.evidence) return `\`${t.evidence.cmd}\` passed (${t.evidence.env}, ${date(t.evidence.at)})`;
-  if (t.lastFailed) return `last verification failed (exit ${t.lastFailed.exit}, ${date(t.lastFailed.at)})`;
-  return "not verified";
-}
-
 export function buildExport(state: State, events: AnyEvent[], root: string): Export {
   const last = events.at(-1);
   const currentN = (k: SlotKey) => state.slots.get(k)?.current?.n ?? 0;
@@ -78,7 +72,7 @@ export function buildExport(state: State, events: AnyEvent[], root: string): Exp
         title: t.title,
         status: t.status,
         ...(t.note ? { note: t.note } : {}),
-        verification: verification(t),
+        verification: verificationLine(t),
         needsReview: t.needsReview.map((d) => d.key),
       })),
   };
@@ -120,7 +114,7 @@ export function renderExportMd(x: Export): string {
   out.push("", "## Tasks");
   if (!x.tasks.length) out.push("", "(none)");
   for (const t of x.tasks) {
-    out.push("", `### ${t.slug}`, "", `- Title: ${one(t.title)}`, `- Status: ${t.status}${t.needsReview.length ? ` ⚠ needs review (${t.needsReview.join(", ")} changed)` : ""}`);
+    out.push("", `### ${t.slug}`, "", `- Title: ${one(t.title)}`, `- Status: ${t.status}${t.status === "needs_review" ? ` (${t.needsReview.join(", ")} changed)` : ""}`);
     out.push(`- Verification: ${t.verification}`);
     if (t.note) out.push(`- Note: ${one(t.note)}`);
   }

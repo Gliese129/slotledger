@@ -1,17 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { arch, platform, release } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { analyze, slotTopics, type Analysis } from "./analyze.js";
 import { dependentsOf, fold, type State } from "./fold.js";
 import { buildExport, renderExport, type ExportFormat } from "./export.js";
 import { changedFiles, snapshot } from "./git.js";
-import { buildNudge, buildReport, formatNudge, renderBrief, renderSearch, renderStatusMd, type Report } from "./report.js";
+import { buildNudge, buildReport, formatNudge, renderBrief, renderSearch, renderStatusMd, reviewHint, type Report } from "./report.js";
 import { strictnessOf } from "./settings.js";
 import { similarSlots } from "./similar.js";
 import { Store, ulid } from "./store.js";
-import type { Actor, AnyEvent, Dep, QOption, SlotKey, TaskStatus } from "./types.js";
-import { CATEGORIES, GUARDED, categoryOf } from "./types.js";
+import type { Actor, AnyEvent, Dep, EvidenceRef, QOption, SlotKey, TaskStatus } from "./types.js";
+import { CATEGORIES, GUARDED, canonicalEvent, canonicalKey, categoryOf } from "./types.js";
 
 /** Errors the AI can fix itself: the message says how */
 export class FixableError extends Error {}
@@ -42,6 +43,23 @@ export interface TaskInput {
   note?: string;
 }
 
+export interface VerifyInput {
+  slug: string;
+  /** run: a command slotboard runs; exit 0 passes */
+  cmd?: string;
+  timeoutSec?: number;
+  /** ref: paths, URLs, or IDs of evidence produced elsewhere */
+  refs?: string[];
+  summary?: string;
+  metrics?: Record<string, string | number>;
+  /** human: the person's exact words accepting (or not accepting) the work */
+  userQuote?: string;
+  /** human: what the acceptance covers */
+  scope?: string;
+  /** ref and human: whether it passed */
+  passed?: boolean;
+}
+
 export interface RespondInput {
   item?: number;
   question?: string;
@@ -51,7 +69,7 @@ export interface RespondInput {
   userQuote: string;
 }
 
-export const HUMAN_ACTIONS = ["edit", "delete", "approve", "reject", "keep", "answer"] as const;
+export const HUMAN_ACTIONS = ["edit", "delete", "approve", "reject", "keep", "answer", "check"] as const;
 
 /** Something a person did directly in the web view */
 export interface HumanAction {
@@ -63,6 +81,10 @@ export interface HumanAction {
   question?: string;
   choice?: string;
   text?: string;
+  /** check: the task a person checked, whether it passed, and what the check covered */
+  task?: string;
+  passed?: boolean;
+  scope?: string;
 }
 
 const WEB: Actor = { kind: "human", channel: "web" };
@@ -76,7 +98,7 @@ export class Board {
   constructor(readonly store: Store) {}
 
   load(): { events: AnyEvent[]; state: State } {
-    const events = this.store.readEvents();
+    const events = this.store.readEvents().map(canonicalEvent);
     return { events, state: fold(events, this.store.readConfig()) };
   }
 
@@ -93,7 +115,7 @@ export class Board {
 
   brief(query?: string): string {
     const { state } = this.load();
-    if (query?.trim()) return renderSearch(state, query.trim());
+    if (query?.trim()) return renderSearch(state, canonicalKey(query.trim()));
     return renderBrief(state, this.store.readConfig(), this.store.errorCount());
   }
 
@@ -104,10 +126,11 @@ export class Board {
 
   // ---------- record ----------
 
-  record(session: string, input: RecordInput): string {
+  record(session: string, raw: RecordInput): string {
+    const input = { ...raw, key: canonicalKey(raw.key), depends: raw.depends?.map(canonicalKey), replaces: raw.replaces?.map(canonicalKey) };
     const cat = categoryOf(input.key);
     if (!cat) {
-      return `Nothing recorded: implementation details don't get slots. If this really is a decision, the key must start with a category: ${CATEGORIES.map((c) => c + "/").join(" ")}, e.g. arch/sync-backend.`;
+      return `Nothing recorded: execution details don't get slots. If this really is a decision, the key must start with a category: ${CATEGORIES.map((c) => c + "/").join(" ")}, e.g. approach/sync-backend.`;
     }
     const name = input.key.slice(cat.length + 1);
     if (!SLUG.test(name)) throw new FixableError(`Key must look like <category>/<lowercase-dashed-name>, e.g. ${cat}/sync-backend; got ${input.key}.`);
@@ -208,7 +231,7 @@ export class Board {
       const downstream = new Set(dependents.map((d) => d.key));
       const candidates = [...after.slots.values()].filter(
         (s) => s.key !== key && !downstream.has(s.key) && s.current && !s.current.retired &&
-          (["assum", "platform", "constraint"].includes(s.category) || slotTopics(s, config.topics).some((t) => mine.has(t))),
+          (["assum", "env", "constraint"].includes(s.category) || slotTopics(s, config.topics).some((t) => mine.has(t))),
       ).slice(0, 5);
       if (candidates.length) {
         out.push(`Possible premises: ${candidates.map((s) => `${s.key} "${s.current!.value}"`).join(", ")}. If this decision rests on any of them, call again with the same value and depends.`);
@@ -226,46 +249,104 @@ export class Board {
   task(session: string, input: TaskInput): string {
     if (!SLUG.test(input.slug)) throw new FixableError(`Slugs use lowercase letters, digits, and dashes, e.g. migrate-platform-to-macos; got ${input.slug}.`);
     if (input.status === "verified") throw new FixableError(`Only verify can set verified: verify({ slug: "${input.slug}", cmd: "<test command>" }).`);
+    if (input.status === "needs_review") throw new FixableError("needs_review is set by slotboard when decisions a task rests on change; it can't be set directly.");
     const actor: Actor = { kind: "agent", session };
     const { state } = this.load();
     const out: string[] = [];
-    let t = state.tasks.get(input.slug);
+    const t = state.tasks.get(input.slug);
+    const basedOn = input.basedOn && this.lockBasis(state, input.basedOn);
     if (!t) {
       if (!input.title) throw new FixableError(`Task ${input.slug} doesn't exist. Creating it needs a title.`);
-      const basedOn: Dep[] = [];
-      for (const k of input.basedOn ?? []) {
-        const n = state.slots.get(k as SlotKey)?.current?.n;
-        if (!n) throw new FixableError(`${k} in basedOn doesn't exist. Record it first, or remove it.`);
-        basedOn.push({ key: k as SlotKey, n });
-      }
-      this.store.append("task.created", actor, { slug: input.slug, title: input.title, basedOn, ...(input.rootCause ? { rootCause: input.rootCause } : {}) });
+      this.store.append("task.created", actor, { slug: input.slug, title: input.title, basedOn: basedOn ?? [], ...(input.rootCause ? { rootCause: input.rootCause } : {}) });
       out.push(`Created task ${input.slug}.`);
+    } else if (basedOn) {
+      // confirming the task still holds under the decisions as they are now (or re-basing it on others)
+      if (!input.note?.trim()) throw new FixableError(`Re-locking basedOn needs a note: why ${input.slug} still holds under the current decisions.`);
+      this.store.append("task.rebased", actor, { slug: input.slug, basedOn, note: input.note.trim() });
+      out.push(`${input.slug} is now based on ${basedOn.length ? basedOn.map((d) => `${d.key}@${d.n}`).join(", ") : "no decisions"}.`);
     }
-    if (input.status && input.status !== (t?.status ?? "todo")) {
+    if (input.status && input.status !== (t?.progress ?? "todo")) {
       this.store.append("task.status", actor, { slug: input.slug, status: input.status, ...(input.note ? { note: input.note } : {}) });
       out.push(`${input.slug} → ${input.status}.`);
     }
     if (!out.length) out.push(`${input.slug} is unchanged.`);
-    if (input.status === "implemented") out.push(`Before calling it done, use verify to run a command that proves it works.`);
+    const now = this.load().state.tasks.get(input.slug)!;
+    if (now.status === "needs_review") out.push(reviewHint(now));
+    else if (input.status === "implemented") out.push(`Before calling it done, use verify with evidence: a command to run (cmd), evidence produced elsewhere (refs), or the user's acceptance (userQuote).`);
     this.writeStatus();
     return out.join("\n");
   }
 
+  /** Lock basedOn keys to the current versions; every key must be a live decision */
+  private lockBasis(state: State, keys: string[]): Dep[] {
+    const out: Dep[] = [];
+    for (const k of new Set(keys.map(canonicalKey))) {
+      const cur = state.slots.get(k as SlotKey)?.current;
+      if (!cur) throw new FixableError(`${k} in basedOn doesn't exist. Record it first, or remove it.`);
+      if (cur.retired) throw new FixableError(`${k} in basedOn is retired${cur.replacedBy ? `; use ${cur.replacedBy}` : ""}.`);
+      out.push({ key: k as SlotKey, n: cur.n });
+    }
+    return out;
+  }
+
+  /** On a pass: a task that needed review gets its basedOn re-locked, following merges and leaving out decisions that are gone */
+  private relockOnPass(state: State, slug: string): { basedOn?: Dep[] } {
+    const t = state.tasks.get(slug)!;
+    if (t.status !== "needs_review") return {};
+    const basedOn: Dep[] = [];
+    for (const d of t.basedOn) {
+      let s = state.slots.get(d.key);
+      if (s?.current?.retired && s.current.replacedBy) s = state.slots.get(s.current.replacedBy);
+      const cur = s?.current;
+      if (s && cur && !cur.retired && !basedOn.some((x) => x.key === s!.key)) basedOn.push({ key: s.key, n: cur.n });
+    }
+    return { basedOn };
+  }
+
   // ---------- verify ----------
 
-  verify(session: string, slug: string, cmd: string, timeoutSec = 600): string {
+  /** Attach evidence to a task: a command slotboard runs (run), evidence produced elsewhere (ref), or a person's acceptance (human) */
+  verify(session: string, input: VerifyInput): string {
+    const { slug } = input;
     const { state } = this.load();
     if (!state.tasks.has(slug)) throw new FixableError(`Task ${slug} doesn't exist. Create it with task first.`);
+    const sources = [input.cmd !== undefined, !!input.refs?.length, input.userQuote !== undefined].filter(Boolean).length;
+    if (sources !== 1) throw new FixableError("Give exactly one kind of evidence: cmd (slotboard runs it), refs + summary (evidence produced elsewhere), or userQuote (a person's acceptance).");
+    if (input.cmd !== undefined) return this.run(session, state, slug, input.cmd, input.timeoutSec);
+    if (input.passed === undefined) throw new FixableError("Say whether it passed: passed: true or false.");
+
+    if (input.refs?.length) {
+      if (!input.summary?.trim()) throw new FixableError("refs need a summary: what the evidence shows, e.g. \"accuracy 0.93 on the held-out set, report attached\".");
+      const refs = input.refs.map((target) => this.resolveRef(target));
+      const data = { slug, kind: "ref" as const, refs, summary: input.summary.trim(), ...(input.metrics && Object.keys(input.metrics).length ? { metrics: input.metrics } : {}), ...(input.passed ? this.relockOnPass(state, slug) : {}) };
+      this.store.append(input.passed ? "task.verified" : "task.verify_failed", { kind: "agent", session }, data);
+      this.writeStatus();
+      const missing = refs.filter((r) => r.missing).map((r) => r.target);
+      return [
+        input.passed ? `Recorded reference evidence for ${slug} (by reference: the pass is your report, not a run slotboard did). ${this.statusAfter(slug)}` : `Recorded failing reference evidence for ${slug}. Task status unchanged.`,
+        ...refs.filter((r) => r.sha256).map((r) => `${r.target}: sha256 ${r.sha256!.slice(0, 12)}…`),
+        ...(missing.length ? [`Not found in the project: ${missing.join(", ")}. If these are local files, fix the paths and record again; if they live elsewhere, that's fine.`] : []),
+      ].join("\n");
+    }
+
+    if (!input.userQuote?.trim()) throw new FixableError("userQuote can't be empty: give the person's exact words.");
+    const data = { slug, kind: "human" as const, userQuote: input.userQuote, ...(input.scope?.trim() ? { scope: input.scope.trim() } : {}), ...(input.passed ? this.relockOnPass(state, slug) : {}) };
+    this.store.append(input.passed ? "task.verified" : "task.verify_failed", { kind: "human", via: session }, data);
+    this.writeStatus();
+    return input.passed ? `Recorded the user's acceptance (by a person). ${this.statusAfter(slug)}` : `Recorded that the user didn't accept ${slug}. Task status unchanged.`;
+  }
+
+  private run(session: string, state: State, slug: string, cmd: string, timeoutSec = 600): string {
     const r = spawnSync("sh", ["-c", cmd], { cwd: this.store.root, encoding: "utf8", timeout: timeoutSec * 1000, maxBuffer: 32 * 1024 * 1024 });
     const output = ((r.stdout ?? "") + (r.stderr ?? "")).trimEnd();
     const outputTail = output.slice(-1500);
     const exit = r.status ?? (r.error ? 124 : 1);
     const env = `${platform()} ${release()} ${arch()}, node ${process.version}`;
-    const data = { slug, cmd, exit, outputTail, env };
+    const data = { slug, kind: "run" as const, cmd, exit, outputTail, env };
     if (exit === 0) {
-      this.store.append("task.verified", { kind: "system", session }, data);
+      this.store.append("task.verified", { kind: "system", session }, { ...data, ...this.relockOnPass(state, slug) });
       this.writeStatus();
-      return `Passed (exit 0, ${env}). ${slug} is now verified.`;
+      return `Passed (exit 0, ${env}). ${this.statusAfter(slug)}`;
     }
     this.store.append("task.verify_failed", { kind: "system", session }, data);
     this.writeStatus();
@@ -273,11 +354,27 @@ export class Board {
     return `Failed (exit ${exit}${r.error ? `, ${r.error.message}` : ""}). Task status unchanged.\nEnd of output:\n${tail}`;
   }
 
+  /** What a pass left the task at: verified, or still needs_review when a decision it rests on has an unresolved premise itself */
+  private statusAfter(slug: string): string {
+    const t = this.load().state.tasks.get(slug)!;
+    return t.status === "verified" ? `${slug} is now verified.` : `${slug} still needs review: ${t.needsReview.map((d) => d.key).join(", ")} ${t.needsReview.length > 1 ? "have" : "has"} a changed premise of its own; settle that decision first.`;
+  }
+
+  /** A local file gets hashed so the evidence names the exact version; URLs and IDs in other systems are kept as given */
+  private resolveRef(target: string): EvidenceRef {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) return { target };
+    const file = resolve(this.store.root, target);
+    if (existsSync(file) && statSync(file).isFile()) return { target, sha256: createHash("sha256").update(readFileSync(file)).digest("hex") };
+    if (existsSync(file)) return { target };
+    // looks like a path (has a slash or a file extension) but isn't there; anything else is an ID such as "slurm job 1234"
+    return /\s/.test(target) || !/[/\\]|\.\w{1,8}$/.test(target) ? { target } : { target, missing: true };
+  }
+
   // ---------- ask ----------
 
   ask(session: string, about: string[], text: string, options?: QOption[]): string {
     const qid = "q-" + ulid().slice(-8).toLowerCase();
-    this.store.append("question.asked", { kind: "agent", session }, { qid, about: about as SlotKey[], text, ...(options?.length ? { options } : {}) });
+    this.store.append("question.asked", { kind: "agent", session }, { qid, about: about.map(canonicalKey) as SlotKey[], text, ...(options?.length ? { options } : {}) });
     this.writeStatus();
     return `Question recorded (${qid}); it will appear in the end-of-turn report. If the user is around, asking directly is faster; record the answer with respond.`;
   }
@@ -294,7 +391,7 @@ export class Board {
       const it = report?.items.find((i) => i.no === input.item);
       if (!it) throw new FixableError(`The latest report has no item ${input.item}. Use question (the question ID, shown in brief) instead.`);
       if (it.kind === "question") qid = it.qid;
-      else decision = { key: it.key!, n: it.n! };
+      else decision = { key: canonicalKey(it.key!), n: it.n! };
     }
 
     if (decision) {
@@ -385,7 +482,7 @@ export class Board {
       }, cause);
       repointed.push(s.key);
     }
-    const tasks = [...state.tasks.values()].filter((t) => t.status !== "dropped" && t.status !== "verified" && t.basedOn.some((b) => gone.has(b.key)));
+    const tasks = [...state.tasks.values()].filter((t) => t.progress !== "dropped" && t.basedOn.some((b) => gone.has(b.key)));
     return [
       `Retired ${replaces.join(", ")} as merged into ${key}.`,
       ...(repointed.length ? [`Re-pointed ${repointed.length} decision(s) that depended on them to ${key}: ${repointed.join(", ")}. Their values are unchanged; if the merged value changes what they rest on, review them.`] : []),
@@ -405,7 +502,19 @@ export class Board {
       return this.respond("", { question: q.qid, choice: input.choice, text: input.text?.trim() || undefined, userQuote: `Answered in the web view: ${said}` }, WEB);
     }
 
-    const slot = input.key ? state.slots.get(input.key as SlotKey) : undefined;
+    if (input.action === "check") {
+      const t = input.task ? state.tasks.get(input.task) : undefined;
+      if (!t || t.progress === "dropped") throw new FixableError(`${input.task ?? "That task"} isn't open.`);
+      if (typeof input.passed !== "boolean") throw new FixableError("Say whether it passed.");
+      const said = input.text?.trim();
+      const userQuote = said ? `${input.passed ? "Accepted" : "Not accepted"} in the web view: ${said}` : `${input.passed ? "Accepted" : "Not accepted"} in the web view.`;
+      const data = { slug: t.slug, kind: "human" as const, userQuote, ...(input.scope?.trim() ? { scope: input.scope.trim() } : {}), ...(input.passed ? this.relockOnPass(state, t.slug) : {}) };
+      this.store.append(input.passed ? "task.verified" : "task.verify_failed", WEB, data);
+      this.writeStatus();
+      return input.passed ? `Marked ${t.slug} as accepted.` : `Recorded that ${t.slug} doesn't pass yet.`;
+    }
+
+    const slot = input.key ? state.slots.get(canonicalKey(input.key) as SlotKey) : undefined;
     if (!slot || slot.deleted) throw new FixableError(`${input.key ?? "That decision"} doesn't exist any more.`);
     const cur = slot.current;
     let out: string;

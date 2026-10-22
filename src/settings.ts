@@ -7,16 +7,16 @@ import { STRICTNESS } from "./types.js";
 /** What each strictness level asks of the AI; shown in brief and when asking the user */
 export const STRICTNESS_GUIDE: Record<Strictness, { summary: string; brief: string }> = {
   strict: {
-    summary: "record every product, arch, platform and assum decision; the end-of-turn check nudges the AI about missed records and unverified work; work counts as done only after verify passes",
-    brief: "Strictness: strict. Record every product, arch, platform and assum decision as soon as you make it. Work counts as done only after verify passes; don't leave tasks at implemented.",
+    summary: "record every goal, approach, env and assum decision; the end-of-turn check nudges the AI about missed records and unverified work; work counts as done only after verify passes",
+    brief: "Strictness: strict. Record every goal, approach, env and assum decision as soon as you make it. Work counts as done only after verify passes; don't leave tasks at implemented.",
   },
   balanced: {
-    summary: "record product, arch and platform decisions and the assumptions they rest on; the end-of-turn check nudges the AI once about missed records",
-    brief: "Strictness: balanced. Record product, arch and platform decisions and the assumptions they rest on; skip implementation details.",
+    summary: "record goal, approach and env decisions and the assumptions they rest on; the end-of-turn check nudges the AI once about missed records",
+    brief: "Strictness: balanced. Record goal, approach and env decisions and the assumptions they rest on; skip execution details.",
   },
   loose: {
-    summary: "only product and arch decisions need recording; the end-of-turn check never interrupts the AI and only adds a note to the report",
-    brief: "Strictness: loose. Only product and arch decisions need recording; everything else is optional.",
+    summary: "only goal and approach decisions need recording; the end-of-turn check never interrupts the AI and only adds a note to the report",
+    brief: "Strictness: loose. Only goal and approach decisions need recording; everything else is optional.",
   },
 };
 

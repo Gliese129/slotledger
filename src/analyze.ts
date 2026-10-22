@@ -64,6 +64,6 @@ export function analyze(state: State, config: Config, sessionId: string, changes
     coarse,
     newDocs: relevant.filter((c) => c.status === "A" && isDoc(c.path)).map((c) => c.path),
     depManifests: relevant.filter((c) => isDepManifest(c.path)).map((c) => c.path),
-    schemaUndeclared: wrote.some((s) => s.category === "arch") ? [] : relevant.filter((c) => isSchema(c.path)).map((c) => c.path),
+    schemaUndeclared: wrote.some((s) => s.category === "approach") ? [] : relevant.filter((c) => isSchema(c.path)).map((c) => c.path),
   };
 }

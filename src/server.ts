@@ -5,7 +5,7 @@ import { Board, FixableError } from "./board.js";
 import { EXPORT_FORMATS } from "./export.js";
 import { currentSession } from "./session.js";
 import { Store, resolveRoot, ulid } from "./store.js";
-import { CATEGORIES } from "./types.js";
+import { CATEGORIES, SETTABLE_STATUSES } from "./types.js";
 
 const VERSION = "0.0.1";
 
@@ -34,11 +34,11 @@ export function createServer(root = resolveRoot()): McpServer {
 
   server.registerTool("record", {
     description:
-      "Call when you make or change a decision: product behavior, architecture, target platform, an assumption, a new dependency, a constraint. " +
+      "Call when you make or change a decision: a goal (what is wanted, what counts as success), an approach (how it's done: design, method, experiment plan), the environment it's bound to, an assumption, a dependency (library, dataset, model, source), a constraint. " +
       "Calling again with the same key creates a new version, so reuse existing keys (find them with brief({ query })). A new key that looks like an existing one is held back once with the similar keys listed. " +
-      "Skip implementation details. Decisions the user stated themselves need userQuote." + writeIn,
+      "Skip execution details. Decisions the user stated themselves need userQuote." + writeIn,
     inputSchema: {
-      key: z.string().describe(`<category>/<dashed-name>; categories: ${CATEGORIES.join(" | ")}. E.g. arch/sync-backend, assum/user-os`),
+      key: z.string().describe(`<category>/<dashed-name>; categories: ${CATEGORIES.join(" | ")}. E.g. approach/sync-backend, goal/success-metric, env/target-os, assum/user-os. Old prefixes product/, arch/, platform/ still work`),
       value: z.string().describe("The decision, in one sentence"),
       rationale: z.string().describe("Why. Used to question the user when a premise changes, so state the basis clearly"),
       depends: z.array(z.string()).optional().describe("Slots this decision rests on (list of keys); their current versions get locked"),
@@ -52,25 +52,38 @@ export function createServer(root = resolveRoot()): McpServer {
   }, (args, extra) => run("record", (s) => board.record(s, args), extra._meta));
 
   server.registerTool("task", {
-    description: "Call when you start, advance, or drop a piece of work. Refer to it by slug. Only verify can set verified.",
+    description:
+      "Call when you start, advance, or drop a piece of work. Refer to it by slug. Each task has one status: todo, in_progress, implemented, needs_review, verified, dropped. " +
+      "Only verify can set verified. slotboard sets needs_review when decisions in basedOn change; resolve it by re-verifying, by passing basedOn again with a note saying why it still holds, or by dropping it.",
     inputSchema: {
       slug: z.string().describe("Lowercase with dashes, e.g. migrate-platform-to-macos"),
       title: z.string().optional().describe("Required when creating"),
-      status: z.enum(["todo", "in_progress", "implemented", "dropped"]).optional(),
-      basedOn: z.array(z.string()).optional().describe("Decisions this work is based on (list of keys); if they change, the task is flagged for review"),
+      status: z.enum(SETTABLE_STATUSES).optional(),
+      basedOn: z.array(z.string()).optional().describe("Decisions this work is based on (list of keys), locked to their current versions; if they change, the task becomes needs_review. On an existing task, passing it again (with note) re-locks it: use this to confirm the task still holds after review"),
       rootCause: z.string().optional().describe("Root cause, when fixing a bug"),
       note: z.string().optional(),
     },
   }, (args, extra) => run("task", (s) => board.task(s, args), extra._meta));
 
   server.registerTool("verify", {
-    description: "Call before claiming work is done: slotboard runs the command and keeps the evidence. Only a pass marks it verified; on failure the status stays.",
+    description:
+      "Call before claiming work is done, with exactly one kind of evidence. " +
+      "run: pass cmd and slotboard runs it (exit 0 passes); prefer this whenever a command can check the work. " +
+      "ref: when the evidence was produced elsewhere (a report, a receipt, an experiment log, a job in another system), pass refs, summary and passed; local files get hashed so the evidence names the exact version. " +
+      "human: when a person checked it themselves, pass userQuote (their exact words), scope and passed. " +
+      "Only a pass marks the task verified; on failure the status stays. The source is shown with the result, so a ref or human pass never reads as a run slotboard did.",
     inputSchema: {
       slug: z.string(),
-      cmd: z.string().describe("A command that proves it works, e.g. npm test -- sync"),
-      timeoutSec: z.number().int().positive().max(3600).optional(),
+      cmd: z.string().optional().describe("run: a command that proves it works, e.g. npm test -- sync"),
+      timeoutSec: z.number().int().positive().max(3600).optional().describe("run only"),
+      refs: z.array(z.string()).optional().describe("ref: project paths, URLs, or IDs in other systems, e.g. reports/eval.md, slurm job 1234"),
+      summary: z.string().optional().describe("ref: what the evidence shows"),
+      metrics: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe("ref: key numbers, e.g. { accuracy: 0.93 }"),
+      userQuote: z.string().optional().describe("human: the person's exact words"),
+      scope: z.string().optional().describe("human: what the acceptance covers, e.g. iPhone 15 on iOS 18"),
+      passed: z.boolean().optional().describe("ref and human: whether it passed"),
     },
-  }, (args, extra) => run("verify", (s) => board.verify(s, args.slug, args.cmd, args.timeoutSec), extra._meta));
+  }, (args, extra) => run("verify", (s) => board.verify(s, args), extra._meta));
 
   server.registerTool("ask", {
     description: "Call when a question needs the user's call and the user isn't around; it appears in the end-of-turn report. If the user is around, ask them directly instead.",

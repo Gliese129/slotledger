@@ -67,16 +67,16 @@ body.open .cols { grid-template-columns: 1fr; }
 .row .side { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; white-space: nowrap; }
 .row.wide .main { display: grid; grid-template-columns: 96px 190px minmax(0, 1fr); align-items: baseline; }
 .tag { font-size: 11.5px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; justify-self: start; }
-.tag.product { background: #ece6fb; color: #6741c5; }
-.tag.arch { background: #e3effa; color: #1f63a8; }
-.tag.platform { background: #e1f3ef; color: #17785f; }
+.tag.goal { background: #ece6fb; color: #6741c5; }
+.tag.approach { background: #e3effa; color: #1f63a8; }
+.tag.env { background: #e1f3ef; color: #17785f; }
 .tag.assum { background: #fdf0dc; color: #9a5a00; }
 .tag.dep { background: #eeeeea; color: #5f5f58; }
 .tag.constraint { background: #fbe7ea; color: #b02a43; }
 @media (prefers-color-scheme: dark) {
-  .tag.product { background: #2d2350; color: #b9a2f5; }
-  .tag.arch { background: #152b40; color: #7fb8ef; }
-  .tag.platform { background: #123129; color: #6fd1b4; }
+  .tag.goal { background: #2d2350; color: #b9a2f5; }
+  .tag.approach { background: #152b40; color: #7fb8ef; }
+  .tag.env { background: #123129; color: #6fd1b4; }
   .tag.assum { background: #372512; color: #f0b061; }
   .tag.dep { background: #2a2a27; color: #b3b3ab; }
   .tag.constraint { background: #3a1820; color: #f08ea0; }
@@ -86,7 +86,7 @@ body.open .cols { grid-template-columns: 1fr; }
 .dot.decided, .dot.verified { background: var(--ok); }
 .dot.proposed, .dot.in_progress, .dot.implemented { background: var(--warn); }
 .dot.accepted_by_default, .dot.todo { background: var(--info); }
-.dot.rejected, .dot.stale, .dot.question { background: var(--bad); }
+.dot.rejected, .dot.stale, .dot.question, .dot.needs_review { background: var(--bad); }
 .dot.retired, .dot.dropped { background: transparent; border: 1.5px solid var(--gray); }
 .flag { font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 10px; line-height: 18px; }
 .flag.bad { background: var(--bad-soft); color: var(--bad); }
@@ -199,16 +199,18 @@ pre { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-
 
 <script>
 "use strict";
-const CATS = ["product", "arch", "platform", "assum", "dep", "constraint"];
-const CAT_LABEL = { product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumptions", dep: "Dependencies", constraint: "Constraints" };
-const CAT_TAG = { product: "Product", arch: "Architecture", platform: "Platform", assum: "Assumption", dep: "Dependency", constraint: "Constraint" };
+const CATS = ["goal", "approach", "env", "assum", "dep", "constraint"];
+const CAT_LABEL = { goal: "Goals", approach: "Approach", env: "Environment", assum: "Assumptions", dep: "Dependencies", constraint: "Constraints" };
+const CAT_TAG = { goal: "Goal", approach: "Approach", env: "Environment", assum: "Assumption", dep: "Dependency", constraint: "Constraint" };
 const tag = (c) => h`<span class="tag ${c}">${CAT_TAG[c] ?? c}</span>`;
 const nameOf = (key) => key.slice(key.indexOf("/") + 1);
 const STATUS = { decided: "Decided", proposed: "Proposed by AI", accepted_by_default: "Accepted by default", rejected: "Rejected", retired: "Retired", deleted: "Deleted" };
-const TASK = { in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped" };
+const TASK = { needs_review: "Needs review", in_progress: "In progress", todo: "To do", implemented: "Implemented, not verified", verified: "Verified", dropped: "Dropped" };
 const TABS = [["overview", "Overview"], ["decisions", "Decisions"], ["tasks", "Tasks"], ["activity", "Activity"]];
-const ASKS = ["product", "arch", "platform", "assum"]; // categories the end-of-turn report asks about
+const ASKS = ["goal", "approach", "env", "assum"]; // categories the end-of-turn report asks about
 const TOKEN = "__SLOTBOARD_TOKEN__"; // filled in by the server; writes are refused without it
+const SOURCE = { run: "ran by slotboard", ref: "by reference", human: "by a person" };
+const SOURCE_NOTE = { run: "", ref: " (by reference)", human: " (by a person)" };
 const TAG_TIP = { "human-edit": "Edited by a person in the web view", "human-approved": "A person approved this AI proposal", "human-rejected": "A person rejected this", "human-decided": "A person decided this" };
 
 let data = null, etag = null, lastOk = 0, D = null;
@@ -257,7 +259,7 @@ function derive() {
   const asked = new Set(userQs.flatMap((q) => (q.origin === "stale_premise" ? [q.about[0]] : [])));
   const stale = data.slots.filter((s) => live(s) && s.stale.length && !asked.has(s.key));
   const openTasks = data.tasks.filter((t) => t.status !== "verified" && t.status !== "dropped");
-  const review = openTasks.filter((t) => t.needsReview.length);
+  const review = openTasks.filter((t) => t.status === "needs_review");
   const starts = data.sessions.map((s) => ({ id: s.id, at: s.start.at }));
   const sessionsSince = (v) => new Set(starts.filter((s) => s.at > v.at && s.id !== v.session).map((s) => s.id)).size;
   return { userQs, proposed, stale, openTasks, review, sessionsSince, needs: userQs.length + stale.length + review.length };
@@ -277,7 +279,7 @@ function taskRow(t) {
   return h`<div class="row ${t.status === "dropped" ? "dim" : ""} ${isSel("task", t.slug) ? "sel" : ""}" ${open("task", t.slug)}>
     <span class="dot ${t.status}" title="${TASK[t.status]}"></span>
     <span class="main"><span class="t">${t.title}</span><span class="k">${t.slug}</span></span>
-    <span class="side">${t.needsReview.length ? h`<span class="flag bad">needs review</span>` : ""}${failed ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "verified" ? h`<span class="flag ok">verified</span>` : ""}</span>
+    <span class="side">${failed && t.status !== "verified" ? h`<span class="flag bad">check failed</span>` : ""}${t.status === "needs_review" ? h`<span class="flag bad">needs review</span>` : t.status === "verified" ? h`<span class="flag ok">verified</span>` : ""}</span>
   </div>`;
 }
 function questionRow(q) {
@@ -348,11 +350,11 @@ function decisions() {
 }
 
 function tasks() {
-  const order = ["in_progress", "todo", "implemented", "verified", "dropped"];
+  const order = ["needs_review", "in_progress", "todo", "implemented", "verified", "dropped"];
   const ts = data.tasks.filter((t) => match(t.slug, t.title, t.note));
   return h`
     <h1 class="page-title">Tasks</h1>
-    <p class="page-sub">Work only counts as verified after slotboard runs a command that proves it.</p>
+    <p class="page-sub">Work only counts as verified with evidence: a command slotboard ran, a referenced report or record, or a person's acceptance. Each shows its source.</p>
     ${order.map((st) => {
       const l = ts.filter((t) => t.status === st);
       if (!l.length) return "";
@@ -382,8 +384,9 @@ function describe(e) {
     case "version.rejected": return ["rejected", ["slot", d.key], `Rejected ${d.key} v${d.n}${d.replacement ? `, replaced with “${d.replacement}”` : ""}`];
     case "task.created": return ["todo", ["task", d.slug], `New task: ${d.title}`];
     case "task.status": return [d.status, ["task", d.slug], `${t(d.slug)} → ${TASK[d.status] ?? d.status}`];
-    case "task.verified": return ["verified", ["task", d.slug], `Verified ${t(d.slug)}`];
-    case "task.verify_failed": return ["rejected", ["task", d.slug], `Check failed for ${t(d.slug)} (exit ${d.exit})`];
+    case "task.rebased": return ["decided", ["task", d.slug], `Re-checked ${t(d.slug)} against the current decisions: ${d.note}`];
+    case "task.verified": return ["verified", ["task", d.slug], `${d.kind === "human" ? "Accepted" : "Verified"} ${t(d.slug)}${SOURCE_NOTE[d.kind ?? "run"]}`];
+    case "task.verify_failed": return ["rejected", ["task", d.slug], `Check failed for ${t(d.slug)}${d.kind === "ref" || d.kind === "human" ? SOURCE_NOTE[d.kind] : ` (exit ${d.exit})`}`];
     case "question.asked": return ["question", ["q", d.qid], `Asked: ${d.text}`];
     case "question.answered": return ["decided", ["q", d.qid], `Answered ${d.option ? `option ${d.option}` : `“${d.text ?? ""}”`}`];
     default: return ["plain", ["slot", null], e.type];
@@ -475,16 +478,27 @@ function taskDetail(t) {
     <div class="d-head"><span class="dot ${t.status}"></span><span class="k">${t.slug}</span><button class="x" data-close title="Close (Esc)">×</button></div>
     <div class="d-body">
       <div class="d-title">${t.title}</div>
-      <div class="d-status"><span class="flag ${t.status === "verified" ? "ok" : t.status === "dropped" ? "gray" : "warn"}">${TASK[t.status]}</span>${t.note ? h`<span>${t.note}</span>` : ""}</div>
-      ${t.needsReview.length ? h`<div class="alert"><p>Decisions it's based on changed: ${t.needsReview.map((x) => x.key).join(", ")}. Check it should still be done.</p></div>` : ""}
+      <div class="d-status"><span class="flag ${t.status === "verified" ? "ok" : t.status === "dropped" ? "gray" : t.status === "needs_review" ? "bad" : "warn"}">${TASK[t.status]}</span>${t.note ? h`<span>${t.note}</span>` : ""}</div>
+      ${t.status === "needs_review" ? h`<div class="alert"><p>Decisions it's based on changed: ${t.needsReview.map((x) => x.key).join(", ")}. The AI re-verifies it, confirms it still holds, or drops it${t.progress === "verified" ? "; the pass below is from before the change" : ""}.</p></div>` : ""}
       ${t.rootCause ? sec("Root cause", h`<p>${t.rootCause}</p>`) : ""}
-      ${sec("Verification", ev || fail ? h`
-        ${ev ? h`<p><span class="flag ok">passed</span> <code>${ev.cmd}</code></p><p class="hint">${ev.env} · ${when(ev.at)}</p>` : ""}
-        ${fail ? h`<p style="margin-top:8px"><span class="flag bad">failed, exit ${fail.exit}</span> <code>${fail.cmd}</code></p><p class="hint">${when(fail.at)}</p>` : ""}
-        <details><summary>Command output</summary><pre>${(fail ?? ev).outputTail || "(no output)"}</pre></details>` : h`<p class="hint">Not verified yet.</p>`)}
+      ${sec("Verification", h`
+        ${ev ? evidence(ev, true) : ""}
+        ${fail ? evidence(fail, false) : ""}
+        ${!ev && !fail ? h`<p class="hint">Not verified yet.</p>` : ""}
+        ${t.status !== "dropped" ? h`<div class="form"><input id="f-check-scope" placeholder="What you checked, e.g. iPhone 15 on iOS 18" value="${draft("f-check-scope", "")}"><input id="f-check-note" placeholder="Comment (optional)" value="${draft("f-check-note", "")}"><div class="acts" style="margin-top:0"><button class="btn ok" data-act="check" data-task="${t.slug}" data-passed="1">Accept</button><button class="btn bad" data-act="check" data-task="${t.slug}" data-passed="">Doesn't pass</button></div></div>` : ""}`)}
       ${sec("Based on", based.length ? h`<div class="mini">${based.map((s) => slotRow(s, false))}</div>` : "")}
       ${sec("History", h`<ul class="hist">${log.map((e) => h`<li><div>${describe(e)[2]}</div><div class="m">${actor(e.actor)} · ${when(e.at)}</div></li>`)}</ul>`)}
     </div>`;
+}
+/** One piece of evidence, with its source spelled out so a reference or a person's word never reads as a run */
+function evidence(e, passed) {
+  const kind = e.kind ?? "run";
+  const head = h`<p style="margin-top:8px"><span class="flag ${passed ? "ok" : "bad"}">${passed ? (kind === "human" ? "accepted" : "passed") : kind === "run" ? `failed, exit ${e.exit}` : kind === "human" ? "not accepted" : "failed"}</span> <span class="flag gray">${SOURCE[kind]}</span></p>`;
+  if (kind === "ref") return h`${head}<p>${e.summary}</p>
+    <ul class="hist">${e.refs.map((r) => h`<li><div><code>${r.target}</code></div><div class="m">${r.sha256 ? `sha256 ${r.sha256.slice(0, 12)}…` : r.missing ? "file not found when recorded" : "outside the project"}</div></li>`)}</ul>
+    ${e.metrics ? h`<p class="hint">${Object.entries(e.metrics).map(([k, v]) => `${k} = ${v}`).join(" · ")}</p>` : ""}<p class="hint">${when(e.at)}</p>`;
+  if (kind === "human") return h`${head}<div class="quote">${e.userQuote}</div><p class="hint">${e.scope ? `Covers ${e.scope} · ` : ""}${when(e.at)}</p>`;
+  return h`${head}<p><code>${e.cmd}</code></p><p class="hint">${e.env} · ${when(e.at)}</p><details><summary>Command output</summary><pre>${e.outputTail || "(no output)"}</pre></details>`;
 }
 function questionDetail(q) {
   const about = q.about.map(slotOf).filter(Boolean);
@@ -560,6 +574,7 @@ async function onAct(btn) {
   const body = { action: a, key };
   if (a === "edit") { body.value = document.getElementById("f-value").value; body.rationale = document.getElementById("f-why").value; }
   if (a === "reject") body.reason = document.getElementById("f-reason")?.value ?? "";
+  if (a === "check") { body.task = btn.dataset.task; body.passed = !!btn.dataset.passed; body.scope = document.getElementById("f-check-scope")?.value; body.text = document.getElementById("f-check-note")?.value; delete body.key; }
   if (a === "answer") { body.question = btn.dataset.q; body.choice = btn.dataset.choice || undefined; body.text = btn.dataset.choice ? undefined : document.getElementById("f-answer")?.value; }
   const ok = await act(body);
   if (ok) {

@@ -8,10 +8,11 @@ AI coding agents are honest in their replies, but the project state they leave b
 
 slotboard is an MCP server plus Claude Code and Codex hooks that records each decision as a **versioned slot** with its rationale and the premises it depends on. When a premise changes, everything built on it is flagged automatically, and you get a short report at the end of the turn with the questions that need you.
 
-- 🚦 **Never blocks your flow.** It flags instead of refusing. The only hard stop is the AI trying to override a product or architecture decision you made yourself.
-- 🔗 **Dependencies locked like a lockfile.** `arch/sync-backend` depends on `assum/user-os@1`. Bump the assumption and the sync decision goes stale, with a question generated from its own rationale.
+- 🚦 **Never blocks your flow.** It flags instead of refusing. The only hard stop is the AI trying to override a goal or approach decision you made yourself.
+- 🔗 **Dependencies locked like a lockfile.** `approach/sync-backend` depends on `assum/user-os@1`. Bump the assumption and the sync decision goes stale, with a question generated from its own rationale.
 - 🕵️ **Catches decisions hidden in code.** A git snapshot diff is mapped to your topics, so "changed `src/sync/**` but recorded nothing" gets noticed.
-- ✅ **Evidence, not claims.** `verify` runs the command itself and keeps the exit code and output. Nothing is "done" until it passes.
+- ✅ **Evidence, not claims.** `verify` runs the command itself and keeps the exit code and output. Work that a command can't check, like an evaluation report or a check on a real device, is recorded as a hashed reference or as a person's acceptance in their own words, and always shown with its source. Nothing is "done" without evidence.
+- 🧪 **Not only for code.** Categories name the role a decision plays (goal, approach, environment…), so research, writing and planning projects use the same premises, reviews and reports.
 - 💬 **One-line answers.** Reply `1A` or `withdraw 2`; the AI records it with your exact words.
 - 📜 **Append-only history.** One event log is the source of truth; status, staleness and questions are all derived from it. Read it as `STATUS.md` or in a local web view, where you can also approve, reject, edit or delete decisions yourself.
 - 🌐 **Your language, your strictness.** On setup the AI asks which language to keep records in and how much to record.
@@ -20,12 +21,12 @@ slotboard is an MCP server plus Claude Code and Codex hooks that records each de
 
 ```
 Needs your call (1; related work is paused)
-1. arch/sync-backend is currently "OneDrive" because: users are all on Windows, which ships OneDrive.
+1. approach/sync-backend is currently "OneDrive" because: users are all on Windows, which ships OneDrive.
    But assum/user-os, which it depends on, changed from "users are all on Windows" to "users are on macOS".
    Does this decision still hold? (A Still holds, keep it / B Needs a new decision) Just reply "1A".
 
 Decisions I made for you (1; you can withdraw any of them)
-2. platform/target-os: macOS 13+ (follows the user's OS)
+2. env/target-os: macOS 13+ (follows the user's OS)
 If you disagree, reply "withdraw 2".
 
 Everything else is done: config-dir-macos (verified on darwin 25.1.0 arm64, node v22.23.0)
@@ -83,14 +84,25 @@ Commit `.project/events.jsonl` with your code: the state then follows branches a
 |---|---|
 | `record` | It makes or changes a decision. Same key again means a new version. |
 | `task` | It starts, advances, or drops a piece of work, by slug. |
-| `verify` | Before claiming something works. slotboard runs the command and keeps the evidence. |
+| `verify` | Before claiming something works, with one kind of evidence: a command slotboard runs (run), evidence produced elsewhere such as a report or a job ID (ref, local files hashed), or a person's acceptance in their words (human). |
 | `ask` | It needs your call while you're away. The question goes into the report. |
 | `respond` | You reply to the report (`1A`, `withdraw 2`) or answer a question. |
 | `brief` | Read-only: live decisions, stale flags, open questions, tasks. |
 | `checkpoint` | Check git changes and return the end-of-turn nudge or report when hooks are unavailable. |
 | `export` | Read-only: the same state as Markdown or JSON, for a shared team doc. |
 
-Decisions are keyed by category: `product/`, `arch/`, `platform/`, `assum/`, `dep/`, `constraint/`. Implementation details aren't recorded.
+Decisions are keyed by category, named for the role they play so they fit any kind of project:
+
+| Category | What counts | Software | Research, writing |
+|---|---|---|---|
+| `goal/` | What is wanted, what counts as success | default behavior | research question, success criterion, audience |
+| `approach/` | How it's done | architecture, data formats | objective, experiment plan, structure |
+| `env/` | The environment it's bound to | target OS, runtime | cluster, checker version, venue format |
+| `assum/` | Facts being relied on | users' OS | data overlap, prior results |
+| `dep/` | Something external it uses | libraries | datasets, models, sources |
+| `constraint/` | Limits, with a scope | code not to touch | budget, word limit |
+
+The earlier names `product/`, `arch/` and `platform/` still work as aliases of `goal/`, `approach/` and `env/`; older logs need no migration. Execution details aren't recorded.
 
 ## Hooks
 
@@ -105,9 +117,9 @@ Decisions are keyed by category: `product/`, `arch/`, `platform/`, `assum/`, `de
 
 | Level | What to record | End-of-turn check |
 |---|---|---|
-| `strict` | product, arch, platform, assum | Nudges once per finding, including tasks left at implemented without verify |
-| `balanced` (default) | product, arch, platform, and the assumptions they rest on | Nudges once per finding |
-| `loose` | product and arch only | Never interrupts the AI; findings only appear in the report |
+| `strict` | goal, approach, env, assum | Nudges once per finding, including tasks left at implemented without verify |
+| `balanced` (default) | goal, approach, env, and the assumptions they rest on | Nudges once per finding |
+| `loose` | goal and approach only | Never interrupts the AI; findings only appear in the report |
 
 Change it any time with `slotboard config --strictness loose`.
 

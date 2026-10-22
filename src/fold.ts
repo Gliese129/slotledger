@@ -1,6 +1,6 @@
 import { shortHash } from "./store.js";
 import type { AnyEvent, Category, Config, Dep, Evidence, HumanTag, QOption, SlotKey, Snapshot, TaskStatus } from "./types.js";
-import { categoryOf } from "./types.js";
+import { canonicalEvent, categoryOf, legacyKey } from "./types.js";
 
 export type VersionStatus = "proposed" | "decided" | "accepted_by_default" | "rejected";
 
@@ -50,7 +50,10 @@ export interface TaskState {
   title: string;
   basedOn: Dep[];
   rootCause?: string;
+  /** needs_review whenever decisions it rests on changed and it isn't dropped; otherwise the same as progress */
   status: TaskStatus;
+  /** Where the work stands apart from review; the status it returns to once basedOn is re-locked */
+  progress: Exclude<TaskStatus, "needs_review">;
   note?: string;
   evidence?: Evidence & { at: string };
   lastFailed?: Evidence & { at: string };
@@ -92,7 +95,8 @@ function sessionOf(ev: AnyEvent): string | undefined {
 }
 
 export function staleQuestionId(slot: SlotKey, n: number, dep: SlotKey, depN: number): string {
-  return "sq-" + shortHash(`${slot}@${n}|${dep}@${depN}`);
+  // hashed from the pre-rename key names so questions answered before the rename stay answered
+  return "sq-" + shortHash(`${legacyKey(slot)}@${n}|${legacyKey(dep)}@${depN}`);
 }
 
 /** Fold events in order into the current state. Every judgment (stale, confirmation status, stale-premise questions) is derived here, never stored. */
@@ -104,7 +108,7 @@ export function fold(events: AnyEvent[], config: Config): State {
   const answered = new Set<string>();
   const sessionStarts: { id: string; at: string }[] = [];
 
-  for (const ev of events) {
+  for (const ev of events.map(canonicalEvent)) {
     const sid = sessionOf(ev);
     switch (ev.type) {
       case "session.started": {
@@ -179,18 +183,27 @@ export function fold(events: AnyEvent[], config: Config): State {
       case "task.created": {
         const d = ev.data;
         if (!tasks.has(d.slug)) {
-          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", session: sid, needsReview: [] });
+          tasks.set(d.slug, { slug: d.slug, title: d.title, basedOn: d.basedOn ?? [], rootCause: d.rootCause, status: "todo", progress: "todo", session: sid, needsReview: [] });
         }
         break;
       }
       case "task.status": {
         const t = tasks.get(ev.data.slug);
-        if (t) { t.status = ev.data.status; t.note = ev.data.note; }
+        if (t && ev.data.status !== "needs_review") { t.progress = ev.data.status; t.note = ev.data.note; }
         break;
       }
       case "task.verified": {
         const t = tasks.get(ev.data.slug);
-        if (t) { t.status = "verified"; t.evidence = { ...ev.data, at: ev.at }; }
+        if (t) {
+          t.progress = "verified";
+          t.evidence = { ...ev.data, at: ev.at };
+          if (ev.data.basedOn) t.basedOn = ev.data.basedOn;
+        }
+        break;
+      }
+      case "task.rebased": {
+        const t = tasks.get(ev.data.slug);
+        if (t) t.basedOn = ev.data.basedOn;
         break;
       }
       case "task.verify_failed": {
@@ -257,13 +270,14 @@ export function fold(events: AnyEvent[], config: Config): State {
     }
   }
 
-  // A task also needs review when a decision it is based on has a stale premise (e.g. an MSI installer based on the Windows platform, whose premise changed)
+  // A task also needs review when a decision it is based on has a stale premise (e.g. an MSI installer based on the Windows env, whose premise changed)
   for (const t of tasks.values()) {
     const direct = staleOf(t.basedOn);
     const indirect = t.basedOn
       .filter((d) => !direct.some((x) => x.key === d.key) && (slots.get(d.key)?.stale.length ?? 0) > 0)
       .map((d) => ({ key: d.key, locked: d.n, current: d.n }));
     t.needsReview = [...direct, ...indirect];
+    t.status = t.needsReview.length && t.progress !== "dropped" ? "needs_review" : t.progress;
   }
   for (const q of questions.values()) if (answered.has(q.qid)) q.status = "answered";
 

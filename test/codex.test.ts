@@ -109,9 +109,9 @@ describe("Codex lifecycle", () => {
     expect(hook("stop", {}).decision).toBe("block");
     expect(hook("stop", { stop_hook_active: true }).systemMessage).toContain("core");
     const board = new Board(new Store(root));
-    board.record("codex-1", { key: "arch/test", value: "A", rationale: "test" });
+    board.record("codex-1", { key: "approach/test", value: "A", rationale: "test" });
     hook("stop", { stop_hook_active: true });
-    expect(hook("prompt", { prompt: "withdraw 1" }).hookSpecificOutput.additionalContext).toContain("arch/test");
+    expect(hook("prompt", { prompt: "withdraw 1" }).hookSpecificOutput.additionalContext).toContain("approach/test");
     hook("session-start", { source: "compact" });
     expect(board.store.readEvents().filter((e) => e.type === "session.started")).toHaveLength(1);
     expect(board.load().state.sessions.get("codex-1")!.client.name).toBe("codex");
@@ -132,9 +132,9 @@ describe("Codex lifecycle", () => {
       const call = (name: string, args: Record<string, unknown> = {}, threadId = "codex-1") => client.callTool({ name, arguments: args, _meta: { threadId } });
       try {
         await call("brief");
-        if (!connection) await call("record", { key: "arch/test", value: "A", rationale: "test" });
+        if (!connection) await call("record", { key: "approach/test", value: "A", rationale: "test" });
         const report = await call("checkpoint", { continued: true });
-        expect(JSON.stringify(report)).toContain(connection ? "No new findings" : "arch/test");
+        expect(JSON.stringify(report)).toContain(connection ? "No new findings" : "approach/test");
         if (!connection) {
           expect(JSON.stringify(await call("brief", { prompt: "withdraw 1" }))).toContain("1 = decision");
           expect((await call("respond", { item: 1, withdraw: true, userQuote: "withdraw 1" })).isError).toBeFalsy();
