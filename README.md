@@ -67,6 +67,8 @@ Codex MCP requests share a session with the hooks through their `threadId`, whic
 
 When run through npx, `init` pins the version it was run with: hooks and the MCP server start `slotledger@<that version>` through `npm exec`, so they keep working after the npx cache is cleared, at the cost of one download on the next start. To upgrade, run `npx slotledger@latest init` again. When installed globally (`npm i -g slotledger`) or built from source, `init` uses that copy directly.
 
+Hooks and the MCP server run without an interactive shell, so node is often not on their PATH (for example with nvm). `init` therefore writes a launcher, `.project/run/slotledger` (`slotledger.cmd` on Windows), and every hook and the MCP config call it. The launcher finds node each time it starts: first the node `init` ran with (for Homebrew, the `opt/<formula>` link instead of the versioned `Cellar` path), then node on PATH, then common fixed locations (Homebrew, `/usr/local/bin`, Volta, fnm, mise and asdf shims, nvm's default alias). On Windows it checks `where node`, `%ProgramFiles%\nodejs`, nvm-windows and Volta. Upgrading or removing a node version therefore doesn't break the hooks. If no node is found, a hook shows a message asking you to rerun `npx slotledger@latest init`, and the MCP server prints the same message to stderr and exits.
+
 ### Configuring topics
 
 To make the "code changed but nothing was recorded" check more precise, assign paths to topics in `.project/config.json`:
@@ -164,6 +166,7 @@ The current version is 0.2. This repository is itself developed with Slot Ledger
 - Changed files can't be attributed to one session when several work in the same working tree. If another session was active during this one, file findings go into your report instead of reminding the AI, marked as possibly coming from that session. Human edits can't yet be told apart from AI edits.
 - A dependency covers a whole decision. When dependents rely on different parts of one, the AI splits it with `split`; until then, `unaffected` handles the effects of a change in one call.
 - `requires` in `.project/config.json` records the oldest version that reads the log correctly, and older versions show an upgrade notice in the brief. 0.1.x doesn't have this check, so everyone working on a repository should upgrade to 0.2 together.
+- The Windows launcher (`slotledger.cmd`) is covered only by tests of the generated script, not yet run on a Windows machine.
 
 ## Development
 

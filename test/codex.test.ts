@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -59,12 +59,14 @@ describe("Codex setup", () => {
     const config = parse(first) as any;
     expect(config.model).toBe("existing-model");
     expect(config.mcp_servers.other.command).toBe("other");
-    expect(config.mcp_servers.slotledger).toMatchObject({ command: process.execPath, args: [cli], cwd: root, disabled_tools: ["verify"], env: { SLOTLEDGER_ROOT: root, SLOTLEDGER_CLIENT: "codex" } });
+    expect(config.mcp_servers.slotledger).toMatchObject({ command: join(root, ".project/run/slotledger"), args: [], cwd: root, disabled_tools: ["verify"], env: { SLOTLEDGER_ROOT: root, SLOTLEDGER_CLIENT: "codex" } });
     expect(config.mcp_servers.slotledger.url).toBeUndefined();
     const parsed = JSON.parse(hooks);
     expect(parsed.hooks.Stop.flatMap((g: any) => g.hooks)).toHaveLength(2);
     expect(parsed.hooks.Stop[0].hooks[0].command).toBe("echo keep-me");
     expect(parsed.hooks.SessionEnd[0].hooks[0].timeout).toBe(3);
+    expect(parsed.hooks.Stop[1].hooks[0].command).toBe(`'${join(root, ".project/run/slotledger")}' hook stop --client codex`);
+    expect(statSync(join(root, ".project/run/slotledger")).mode & 0o111).toBe(0o111);
     expect(existsSync(join(root, ".agents/skills/slotledger/SKILL.md"))).toBe(true);
     expect(existsSync(join(root, ".claude"))).toBe(false);
     expect(existsSync(join(root, ".mcp.json"))).toBe(false);
@@ -99,17 +101,23 @@ describe("Codex setup", () => {
 
   it("rerunning init removes the prompt hook older versions installed and keeps everyone else's", () => {
     const old = (cmd: string) => ({ hooks: [{ type: "command", command: cmd }] });
+    // 0.2.1 under npx: a versioned node and npm-cli.js, pinned through npm exec
+    const cellar = "/opt/homebrew/Cellar/node@22/22.23.0";
+    const pinned = (client: string) => `'${cellar}/bin/node' '${cellar}/lib/node_modules/npm/bin/npm-cli.js' 'exec' '--yes' '--package=slotledger@0.2.1' '--call' 'node "$(command -v slotledger)" hook stop --client ${client}'`;
     write(".claude/settings.json", JSON.stringify({ hooks: {
       UserPromptSubmit: [old("node /x/slotledger/dist/cli.js hook prompt --client claude-code"), old("echo mine")],
+      Stop: [old(pinned("claude-code"))],
     } }));
-    write(".codex/hooks.json", JSON.stringify({ hooks: { UserPromptSubmit: [old("npx slotledger hook prompt --client codex")] } }));
+    write(".codex/hooks.json", JSON.stringify({ hooks: { UserPromptSubmit: [old("npx slotledger hook prompt --client codex")], Stop: [old(pinned("codex"))] } }));
     run("init", "--client", "both");
     const claude = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8")).hooks;
     expect(claude.UserPromptSubmit).toEqual([old("echo mine")]);
     expect(Object.keys(claude).sort()).toEqual(["SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
+    expect(claude.Stop.map((g: any) => g.hooks[0].command)).toEqual([`'${join(root, ".project/run/slotledger")}' hook stop --client claude-code`]);
     const codex = JSON.parse(readFileSync(join(root, ".codex/hooks.json"), "utf8")).hooks;
     expect(codex.UserPromptSubmit).toBeUndefined();
     expect(Object.keys(codex).sort()).toEqual(["SessionEnd", "SessionStart", "Stop"]);
+    expect(codex.Stop.flatMap((g: any) => g.hooks).map((h: any) => h.command)).toEqual([`'${join(root, ".project/run/slotledger")}' hook stop --client codex`]);
   });
 
   it("rejects invalid TOML and client names before installing", () => {

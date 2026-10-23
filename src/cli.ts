@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { Board } from "./board.js";
 import { codexConfig, installCodex, installSkill } from "./codex.js";
 import { EXPORT_FORMATS, type ExportFormat } from "./export.js";
-import { CLI, launch, shellQuote } from "./launch.js";
+import { CLI, launcher } from "./launch.js";
 import { startServer } from "./server.js";
 import { linkSession } from "./session.js";
 import { STRICTNESS_GUIDE, configCommand, isConfigured, validateSettings, writeSettings, type SettingsInput } from "./settings.js";
@@ -134,8 +134,9 @@ function init(target: string, settings: SettingsInput, chosen: string | undefine
   const client = chosen ?? (sign ? "both" : "claude-code");
   const clients = { "claude-code": "Claude Code", codex: "Codex", both: "Claude Code and Codex" }[client];
   const why = chosen ? "" : sign ? ` (found ${sign}; pass --client to choose)` : " (no sign of Codex; add it with --client both)";
-  const [command, ...args] = launch();
-  const cmd = (sub: string, agent: string) => launch(["hook", sub, "--client", agent]).map(shellQuote).join(" ");
+  const run = launcher(root);
+  const { command, args } = run.mcp;
+  const cmd = (sub: string, agent: string) => run.hook(["hook", sub, "--client", agent]);
   // Ours: hook commands and servers this or an earlier install wrote, including from before the rename
   const ours = (text: string) => text.includes(CLI) || /slot(ledger|board)\b/.test(text);
   // Parse existing TOML before writing any files so invalid config leaves setup untouched.
@@ -147,6 +148,9 @@ function init(target: string, settings: SettingsInput, chosen: string | undefine
   const config = writeSettings(root, settings);
   appendLine(join(root, ".gitattributes"), ".project/events.jsonl merge=union");
   appendLine(join(root, ".gitignore"), ".project/run/");
+  mkdirSync(dirname(run.path), { recursive: true });
+  writeFileSync(run.path, run.script);
+  chmodSync(run.path, 0o755);
 
   if (client !== "codex") mergeJson(join(root, ".mcp.json"), (c) => {
     const { slotboard: _, ...servers } = c.mcpServers ?? {};
@@ -189,6 +193,7 @@ function init(target: string, settings: SettingsInput, chosen: string | undefine
 
   console.log(`slotledger is set up in ${root}
 - Clients: ${clients}${why}
+- .project/run/${basename(run.path)}: starts slotledger for the hooks and MCP server, finding node at run time
 - .project/config.json: define topics and their paths for more accurate undeclared-change checks
 ${client !== "codex" ? "- .mcp.json, .claude/settings.json: the Claude Code MCP server and hooks\n- .claude/skills/slotledger/SKILL.md: installed the skill\n" : ""}${codex !== undefined ? "- .codex/config.toml, .codex/hooks.json: the Codex MCP server and hooks\n- .agents/skills/slotledger/SKILL.md: installed the shared skill\n- Trust this project and review/trust its hooks in Codex, then start a new session\n- Without hooks, call brief before edits and checkpoint before finishing each turn\n" : ""}\
 - Run \`slotledger web\` to view the project state in a browser

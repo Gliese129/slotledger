@@ -67,6 +67,8 @@ Codex 的 MCP 请求通过 `threadId` 与 hooks 共用同一个会话，重连�
 
 通过 npx 运行时，`init` 会锁定当时的版本：hooks 和 MCP server 通过 `npm exec` 启动 `slotledger@<该版本>`，即使清除了 npx 缓存也能正常运行，只是之后第一次启动会重新下载。升级时重新运行 `npx slotledger@latest init`。如果是全局安装（`npm i -g slotledger`）或从源码构建，`init` 会直接使用那一份。
 
+hooks 和 MCP server 不在交互式 shell 里运行，PATH 上常常没有 node（比如用 nvm 时）。因此 `init` 会写一个启动脚本 `.project/run/slotledger`（Windows 上是 `slotledger.cmd`），所有 hook 和 MCP 配置都调用它。脚本每次启动时查找 node，顺序是：先用 `init` 运行时的那个 node（Homebrew 的话改用 `opt/<formula>` 链接，不用带版本号的 `Cellar` 路径），然后是 PATH 上的 node，再然后是常见的固定位置（Homebrew、`/usr/local/bin`、Volta、fnm、mise 和 asdf 的 shim、nvm 的 default 别名）。Windows 上依次查 `where node`、`%ProgramFiles%\nodejs`、nvm-windows 和 Volta。所以升级或卸载某个 node 版本不会让 hooks 失效。如果找不到 node，hook 会显示一条提示，请你重新运行 `npx slotledger@latest init`；MCP server 把同样的提示输出到 stderr 后退出。
+
 ### 配置主题
 
 为了让"改了代码却没有记录"的检查更准确，可以在 `.project/config.json` 中把路径划分到主题：
@@ -164,6 +166,7 @@ slotledger export [--format markdown|json]   # 导出项目状态，供团队共
 - 同一个工作区中多个会话的文件改动无法区分归属。本会话期间如果有其他会话在活动，文件类的发现不再提醒 AI，而是放进给你的汇报，并注明可能来自那个会话。尚不能区分人的修改和 AI 的修改。
 - 依赖针对的是整个决定。如果下游分别依赖其中不同的部分，AI 会用 `split` 把它拆开；拆分之前，可以用 `unaffected` 一次处理一处改动的影响。
 - `.project/config.json` 中的 `requires` 记录能正确读取日志的最低版本，版本更旧时会在 brief 中提示升级。0.1.x 没有这项检查，因此同一个仓库的协作者应一起升级到 0.2。
+- Windows 启动脚本（`slotledger.cmd`）目前只有针对生成内容的测试，还没有在 Windows 机器上实际运行过。
 
 ## 开发
 
