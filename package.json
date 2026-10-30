@@ -1,6 +1,6 @@
 {
   "name": "slotledger",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Project-state MCP server for Claude Code / Codex: every AI decision visible, traceable, revocable.",
   "repository": {
     "type": "git",

@@ -34,9 +34,10 @@ export function createServer(root = resolveRoot()): McpServer {
 
   server.registerTool("record", {
     description:
-      "Call when you make or change a decision: a goal (what is wanted, what counts as success), an approach (how it's done: design, method, experiment plan), the environment it's bound to, an assumption, a dependency (library, dataset, model, source), a constraint. " +
-      "Calling again with the same key creates a new version, so reuse existing keys (find them with brief({ query })). A new key that looks like an existing one is held back once with the similar keys listed. " +
-      "Skip execution details. Decisions the user stated themselves need userQuote. " +
+      "Call when you make or change a decision that other work or a later session rests on: a goal (what is wanted, what counts as success), an approach (how it's done: design, method, experiment plan), the environment it's bound to, an assumption, a dependency (library, dataset, model, source), a constraint. " +
+      "Not for execution details, demos, smoke tests, exploratory runs, a single run's parameters, or one-off checks. " +
+      "Calling again with the same key creates a new version, so reuse existing keys; a new key that looks like an existing one is held back once with the similar keys listed, so there's no need to search first. " +
+      "A decision the user stated is one entry with their words in userQuote; add a separate goal only when they stated a goal other decisions rest on. " +
       "Only a new value (or retiring) asks what rests on it to be reviewed. If a premise changed and this decision still holds, call again with the same value: that re-locks it without a new version. " +
       "When you change a value, list everything resting on it that the change doesn't affect in unaffected, all in one call; later, record({ key, unaffected }) without value does the same. Handle reviews in a few calls yourself; don't hand them to subagents. " +
       "Keep one key to one decision that can change on its own; when dependents rest on different parts of a decision, split it." + writeIn,
@@ -97,7 +98,8 @@ export function createServer(root = resolveRoot()): McpServer {
 
   server.registerTool("task", {
     description:
-      "Call when you start, advance, or drop a piece of work. Refer to it by slug. Each task has one status: todo, in_progress, implemented, needs_review, verified, dropped. " +
+      "Call for work that spans sessions or days, is handed over, or the user asked to track: when it starts, advances or is dropped. Work you finish in this session needs no task, and don't create one just to verify something. " +
+      "Refer to it by slug; creating one can set status, basedOn and handoff in the same call. Each task has one status: todo, in_progress, implemented, needs_review, verified, dropped. " +
       "Only verify can set verified. slotledger sets needs_review when a decision in basedOn gets a new value; resolve it by re-verifying, by passing basedOn again with a note saying why it still holds, or by dropping it. " +
       "While a decision in basedOn only waits for its own premise review, the task just follows that review: confirm the decision and the task needs nothing. " +
       "Title, note and rootCause can be changed on an existing task; don't recreate a task to fix its title. " +
@@ -119,7 +121,7 @@ export function createServer(root = resolveRoot()): McpServer {
 
   server.registerTool("verify", {
     description:
-      "Call before claiming work is done, with exactly one kind of evidence. " +
+      "Call when you mark a tracked task done, with exactly one kind of evidence. A quick check of untracked work needs no verify; just tell the user what you checked. " +
       "run: pass cmd and slotledger runs it (exit 0 passes); prefer this whenever a command can check the work. " +
       "ref: when the evidence was produced elsewhere (a report, a receipt, an experiment log, a job in another system), pass refs, summary and passed; local files get hashed so the evidence names the exact version. " +
       "human: when a person checked it themselves, pass userQuote (their exact words), scope and passed. " +
@@ -159,10 +161,10 @@ export function createServer(root = resolveRoot()): McpServer {
   }, (args, extra) => run("respond", (s) => board.respond(s, args), extra._meta));
 
   server.registerTool("brief", {
-    description: "Show live decisions, stale-premise flags, open questions, and tasks. Call before starting work or when unsure of the current state. With query, search decisions (including retired ones) and tasks, e.g. before adding a new key.",
+    description: "Show live decisions, stale-premise flags, open questions, and tasks. Hooks already show it at session start; call it when unsure of the current state. With query, search decisions (including retired ones) and tasks.",
     inputSchema: {
       query: z.string().optional().describe("Words to search slot keys, values, rationales and tasks for"),
-      prompt: z.string().optional().describe("The user's reply to the last report, e.g. 1A or withdraw 2: adds what its numbers mean"),
+      prompt: z.string().optional().describe("Only when the user answers numbered items of the end-of-turn report, e.g. 1A or withdraw 2: adds what the numbers mean"),
     },
     annotations: { readOnlyHint: true },
   }, (args, extra) => run("brief", (s) => [board.brief(args.query), args.prompt ? board.reportItems(s) ?? "No report with numbered items in this session." : null].filter(Boolean).join("\n\n"), extra._meta));

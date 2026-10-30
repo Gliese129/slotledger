@@ -8,15 +8,15 @@ import { STRICTNESS } from "./types.js";
 export const STRICTNESS_GUIDE: Record<Strictness, { summary: string; brief: string }> = {
   strict: {
     summary: "record every goal, approach, env and assum decision; the end-of-turn check nudges the AI about missed records and unverified work; work counts as done only after verify passes",
-    brief: "Strictness: strict. Record every goal, approach, env and assum decision as soon as you make it. Work counts as done only after verify passes; don't leave tasks at implemented.",
+    brief: "Strictness: strict. Record every goal, approach, env and assum decision as soon as you make it. Work counts as done only after verify passes; don't leave tasks at implemented. Demos, smoke tests and exploratory runs still aren't decisions.",
   },
   balanced: {
-    summary: "record goal, approach and env decisions and the assumptions they rest on; the end-of-turn check nudges the AI once about missed records",
-    brief: "Strictness: balanced. Record goal, approach and env decisions and the assumptions they rest on; skip execution details.",
+    summary: "record goal, approach and env decisions other work rests on, and the assumptions several of them share; the end-of-turn check nudges the AI once about missed records",
+    brief: "Strictness: balanced. Record goal, approach and env decisions that other work or a later session rests on, and an assumption only when several decisions rest on it and it could turn out wrong. Don't record execution details, demos, smoke tests, exploratory runs, parameter tweaks or one-off checks.",
   },
   loose: {
     summary: "only goal and approach decisions need recording; the end-of-turn check never interrupts the AI and only adds a note to the report",
-    brief: "Strictness: loose. Only goal and approach decisions need recording; everything else is optional.",
+    brief: "Strictness: loose. Only goal and approach decisions that later work rests on need recording; create tasks only when the user asks to track something.",
   },
 };
 

@@ -1,6 +1,6 @@
 ---
 name: slotledger
-description: When the project has the slotledger MCP (record/task/verify/ask/respond/brief/split/archive tools), use it to record decisions, plans, tasks and handoffs instead of writing PLAN/TODO/HANDOFF documents. Use it when making a decision, changing an approach, noticing a premise has changed, starting, finishing or handing over work, cleaning up finished work, or when the user replies to report numbers.
+description: When the project has the slotledger MCP (record/task/verify/ask/respond/brief/split/archive tools), use it for decisions other work rests on, work that spans sessions, and handoffs, instead of PLAN/TODO/HANDOFF documents. Use it when making or changing such a decision, noticing a premise has changed, starting, finishing or handing over tracked work, cleaning up finished work, or when the user answers numbered items of the end-of-turn report. Demos, smoke tests, exploratory runs and one-off checks need no records.
 ---
 
 # Recording project state with slotledger
@@ -14,7 +14,7 @@ Before installing slotledger into a project (or when brief says the settings are
 1. **Language**: which language decisions, rationales, task titles and questions should be written in. slotledger's own messages stay in English.
 2. **Strictness**:
    - strict: record every goal, approach, env and assum decision; tasks count as done only after verify.
-   - balanced (default): record goal, approach and env decisions and the assumptions they rest on.
+   - balanced (default): record goal, approach and env decisions other work rests on, and an assumption only when several decisions rest on it and it could turn out wrong.
    - loose: only goal and approach decisions; the end-of-turn check never interrupts you.
 
 Follow the language and strictness that brief shows for the project.
@@ -25,7 +25,7 @@ Call `brief` before editing when hooks are unavailable; this establishes the ses
 
 ## When to record
 
-Record as soon as you make or change one of these decisions, not at the end. Categories name the role a decision plays, so they fit software, research, writing and planning alike:
+Record only what later work or another session needs to know. The test: if this changed later, would some other decision, task or session go wrong without being told? If not, don't record it. Record a decision as soon as you make or change it, not at the end. Categories name the role a decision plays, so they fit software, research, writing and planning alike:
 
 | Category | What counts | Software | Research, writing, planning |
 |---|---|---|---|
@@ -36,13 +36,17 @@ Record as soon as you make or change one of these decisions, not at the end. Cat
 | dep | Something external the work uses (also detected from the diff for libraries) | `dep/better-sqlite3` | `dep/eval-dataset`, `dep/base-model` |
 | constraint | Something that must not be touched or exceeded; needs scope | `constraint/no-touch-legacy` | `constraint/gpu-budget`, `constraint/word-limit` |
 
-The old prefixes `product/`, `arch/` and `platform/` still work and mean `goal/`, `approach/` and `env/`. Execution details like variable names, function splits, typo fixes, or a single run's hyperparameter tweak don't need recording.
+The old prefixes `product/`, `arch/` and `platform/` still work and mean `goal/`, `approach/` and `env/`.
+
+Don't record: execution details (variable names, function splits, typo fixes), demos, smoke tests, exploratory or sanity runs, a single run's parameters, debugging steps, or one-off checks. An exploratory result becomes a decision only when someone settles on it ("use 3e-4 from now on").
+
+Keep it to few calls: a decision the user states is one `record` with their words in userQuote, and the reason they give goes in its rationale, not in a separate assum or goal (add those only when several decisions rest on them); there's no need to search with `brief` before a new key, since `record` holds back near-duplicates itself.
 
 - **Write a clear rationale.** It is used to question the user when a premise changes.
 - **Fill in depends.** Depend on whichever assumption or environment the decision rests on. The record result suggests candidates.
 - **If the user said it, include userQuote.** Only then does it count as the user's decision.
 - **Changing a goal/approach decision the user made is refused.** Ask the user first; once they agree, write it with userQuote.
-- **Reuse keys.** Before adding a key, search with `brief({ query: "..." })`. Updating an existing key makes a new version. A new key that looks like an existing one is held back once with the similar keys listed: reuse one, merge with `replaces: [old keys]`, or pass `new: true` if it really is separate.
+- **Reuse keys.** Updating an existing key makes a new version. There's no need to search first: a new key that looks like an existing one is held back once with the similar keys listed: reuse one, merge with `replaces: [old keys]`, or pass `new: true` if it really is separate.
 - **Merge duplicates** when brief lists them: record the one to keep with `replaces`. The old keys are retired and the decisions that depended on them are re-pointed, keeping their status.
 - **One key, one decision that can change on its own.** If a value bundles several choices (say a loss's first-token term, its later-position weight and its teacher) and different work rests on different parts, split it with `split`: give the pieces, and in `dependents` point each decision and task at the pieces it really rests on. Split several decisions in one call. Re-pointing asks nothing of anyone, and afterwards a change to one piece only flags what rests on that piece. `record` suggests this when most of a change's dependents turn out unaffected.
 
@@ -65,19 +69,20 @@ Only a new value (or retiring, deleting, rejecting) flags anything, and only one
 
 ## Tasks
 
-- `task` tracks work by slug. Each task has exactly one status: todo, in_progress, implemented, needs_review, verified, dropped. Set in_progress when you start, implemented when the work is done, dropped if it's abandoned.
+- Create a task only for work that spans sessions or days, is handed over, or the user asked to track (a multi-day experiment matrix, a feature finished next session). Work you finish in this session needs no task, even if it takes several turns.
+- `task` tracks work by slug. Each task has exactly one status: todo, in_progress, implemented, needs_review, verified, dropped. Set in_progress when you start, implemented when the work is done, dropped if it's abandoned. Creating a task can set status, basedOn and handoff in one call.
 - needs_review is set by slotledger when a decision in the task's basedOn gets a new value, even if the task was verified; the old pass stays in its history. Pick one way out:
   - **re-verify** with `verify`: a pass re-locks basedOn to the current decisions;
   - **confirm it still holds**: `task({ slug, basedOn: [keys], note: "why it still holds" })` re-locks basedOn and returns the task to its earlier status;
   - **drop it** with status dropped.
   If a decision it rests on only has a changed premise of its own, the task shows "waiting on review" and needs nothing from you: review the decision, and the task follows.
 - Change a task's title, note or rootCause in place with `task`; don't recreate it to fix its wording. `task({ slug })` alone shows the task in full.
-- Done means `verify`, with one of three kinds of evidence. Each is shown with its source, so be honest about which one you have:
+- A tracked task is done with `verify`, with one of three kinds of evidence. Checking untracked work (a bug fix you just made, a demo) needs no task and no verify: just tell the user what you ran. Each kind of evidence is shown with its source, so be honest about which one you have:
   - **run** (`cmd`): slotledger runs the command and keeps the exit code and output. Use it whenever a command can check the work, including scripts that check a report's metrics.
   - **ref** (`refs`, `summary`, `passed`): the evidence was produced elsewhere, e.g. an evaluation report, a run receipt, a job on a cluster scheduler, a URL. Local files get hashed so the evidence names the exact version; add key numbers in `metrics`. The pass is your reading of it, so say what it shows, not more.
   - **human** (`userQuote`, `scope`, `passed`): a person checked it themselves, e.g. on a real device or by reading the draft. Use their exact words and say what the check covered. People can also accept a task in the web view.
-- Don't call anything done without evidence; if it was only checked in one environment or on one input, say which.
-- Turn plans and todos straight into tasks instead of separate documents.
+- Don't mark a tracked task done without evidence; if it was only checked in one environment or on one input, say which.
+- Turn plans that span sessions into tasks instead of separate documents.
 - **Handing over:** write `task({ slug, handoff: "..." })` instead of a HANDOFF document: what's done, what's next, where things are, what to watch out for. It's locked to the task's basedOn (add others with `handoffOn`); a new handoff replaces the old one. Whoever picks it up reads it with `task({ slug })`, which lists any of those decisions that changed since; follow the current decision there.
 - **On hold:** `task({ slug, lifecycle: "suspended", note })` takes a task out of the list and reminders without dropping it; its decisions still count as in use. `lifecycle: "live"` brings it back, with any review it now needs. Use this instead of re-locking a task with a "deferred" note.
 - **Cleaning up:** `archive({ tasks, decisions, note })` takes finished or abandoned tasks out of the brief (unfinished ones are dropped first) and retires decisions, several at once. When a task is dropped or a decision retired, the result lists decisions nothing live uses any more; retire the ones that are no longer needed in one more `archive` call. Retiring the user's goal or approach needs their words in userQuote.
@@ -86,7 +91,7 @@ Only a new value (or retiring, deleting, rejecting) flags anything, and only one
 
 - If the user is around, ask them directly; record the answer with `respond`, passing the question ID from brief as question.
 - If the user isn't around, use `ask`; the question appears in the end-of-turn report.
-- When the user replies to report numbers, e.g. "1A" or "withdraw 2", first call `brief({ prompt: "<their reply>" })` to see what the numbers mean, then record it with `respond`. userQuote is the user's exact words.
+- Only when the user answers the numbered items of the end-of-turn report, e.g. "1A" or "withdraw 2", first call `brief({ prompt: "<their reply>" })` to see what the numbers mean, then record it with `respond`. userQuote is the user's exact words.
 
 ## Shared team docs
 
@@ -101,7 +106,7 @@ The team may follow the project in a shared doc (Notion, a wiki, or similar) tha
 
 ## Wrapping up
 
-With lifecycle hooks, slotledger builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision you missed, record it; if it's only an execution detail, just finish.
+With lifecycle hooks, slotledger builds the end-of-turn report itself and shows it to the user, so don't repeat it. If it reminds you of a decision other work rests on that you missed, record it; if it's only an execution detail, just finish.
 
 Without lifecycle hooks, call `checkpoint` before finishing each turn. If it returns a nudge, address any missing records and call `checkpoint({ continued: true })` to get the report. Show that report verbatim to the user; "No new findings" needs no mention. This fallback relies on you calling the tools; it cannot automatically continue a turn or display a report outside your response.
 

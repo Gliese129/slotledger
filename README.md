@@ -125,7 +125,7 @@ The earlier prefixes `product/`, `arch/`, and `platform/` still work as aliases 
 | Level | Decisions recorded | End-of-turn check |
 |---|---|---|
 | `strict` | goal, approach, env, assum | One reminder per finding, including tasks implemented but not verified |
-| `balanced` (default) | goal, approach, env, and the assumptions they rest on | One reminder per finding |
+| `balanced` (default) | goal, approach, env decisions other work rests on, and assumptions several of them share | One reminder per finding |
 | `loose` | goal and approach only | Never interrupts the AI; findings only appear in the report |
 
 You can change it at any time: `npx slotledger config --strictness loose`.

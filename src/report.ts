@@ -214,9 +214,8 @@ export function renderBrief(state: State, config: Config, errors = 0): string {
 
   lines.push(
     "",
-    "Use record when you make or change a decision; task when you start or advance work; verify with evidence (a command, a reference, or the user's acceptance) before claiming something is done; respond when the user replies to numbers in a report.",
-    "Before adding a new key, look for an existing one with brief({ query }); reuse or merge instead of adding near-duplicates.",
-    "Keep plans, todos, and decisions here; don't write separate PLAN/TODO/handoff documents.",
+    "Record only what later work or another session needs: a decision other work rests on (record), work that spans sessions or days or is handed over (task), and evidence when you mark a tracked task done (verify). Demos, smoke tests, exploratory runs and one-off checks need nothing. When the user answers numbered items of the end-of-turn report (\"1A\", \"withdraw 2\"), look them up with brief({ prompt }) and record the answer with respond.",
+    "record holds back a new key that looks like an existing one, so there's no need to search first. Keep plans, todos and handoffs here rather than in separate documents.",
   );
   return lines.join("\n");
 }
@@ -430,5 +429,5 @@ export function buildNudge(state: State, analysis: Analysis | null, strictness: 
 }
 
 export function formatNudge(parts: NudgePart[]): string {
-  return ["slotledger reminder (shown once; handle it, or confirm nothing is needed, then finish):", ...parts.map((p) => `- ${p.text}`), "If it's only an implementation detail, there's nothing to record; just finish."].join("\n");
+  return ["slotledger reminder (shown once; handle it, or confirm nothing is needed, then finish):", ...parts.map((p) => `- ${p.text}`), "If these changes carry no decision other work rests on (demo, experiment, test or tooling edits, refactors), there's nothing to record; just finish."].join("\n");
 }

@@ -125,7 +125,7 @@ hooks 和 MCP server 不在交互式 shell 里运行，PATH 上常常没有 node
 | 档位 | 记录哪些决定 | 回合结束时的检查 |
 |---|---|---|
 | `strict` | goal、approach、env、assum | 每项发现提醒一次；已实现但未验证的任务也会被提醒 |
-| `balanced`（默认） | goal、approach、env，以及它们依赖的假设 | 每项发现提醒一次 |
+| `balanced`（默认） | 有其他工作依赖的 goal、approach、env 决定，以及被多个决定共同依赖的假设 | 每项发现提醒一次 |
 | `loose` | 只记录 goal 和 approach | 不打断 AI，发现只出现在汇报中 |
 
 可以随时修改：`npx slotledger config --strictness loose`。
